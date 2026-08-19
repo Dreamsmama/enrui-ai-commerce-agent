@@ -193,4 +193,36 @@ npm run dev
 
 ## License
 
+## 导入百雀羚 Demo 数据
+
+仓库内的 `backend/demo_data/pechoin-demo` 包含商品资料、4 张商品素材、品牌知识和设计 Skill，不包含用户邮箱、密码哈希、生成历史或 API Key。
+
+如需直接使用当前完整 SQLite 数据快照（包含本地账户、项目和生成记录），执行：
+
+```bash
+cp backend/demo_data/commerce_agent.db backend/commerce_agent.db
+```
+
+该快照仅用于团队内部开发，不能部署到公开生产环境。
+
+同事先启动项目并注册自己的账户，然后执行：
+
+```bash
+cd backend
+.venv/bin/python scripts/transfer_demo_data.py import \
+  --email 同事的登录邮箱 \
+  --input demo_data/pechoin-demo
+```
+
+需要重新导出某个账户所属租户的业务数据时执行：
+
+```bash
+cd backend
+.venv/bin/python scripts/transfer_demo_data.py export \
+  --email 登录邮箱 \
+  --output demo_data/导出目录
+```
+
+导入按商品名称、知识标题和 Skill 名称幂等更新，不会复制账户凭据。
+
 MIT — 用于学习与作品集展示。
