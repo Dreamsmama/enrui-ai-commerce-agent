@@ -180,8 +180,10 @@ class LLMClient:
         if src.startswith("http://") or src.startswith("https://"):
             return src
 
-        # Local file path → base64 data URI
-        path = Path(src)
+        # Stored object or local file → base64 data URI
+        from app.services.storage import get_storage
+        stored = get_storage().local_path(src)
+        path = stored or Path(src)
         if not path.is_absolute():
             path = get_settings().upload_path / src.lstrip("/")
         if not path.exists():

@@ -11,3 +11,6 @@ numpy>=1.26.0,<2.1
 openai==1.58.1
 pypdf==5.1.0
 python-docx==1.1.2
+psycopg[binary]>=3.2.3,<3.3
+redis>=5.2.1,<6
+oss2>=2.19.1,<3

@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Any
 
 from app.database import SessionLocal
-from app.models import CreativeFeedback, ImageReview, LearnedDesignProfile, Product
+from app.models import CreativeFeedback, ImageReview, LearnedDesignProfile, Product, SkillCandidate
 from app.services.llm import get_llm
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,32 @@ def _rebuild_profile(db, product: Product) -> LearnedDesignProfile:
     }
     db.commit()
     db.refresh(profile)
+    # A candidate is reviewable only after enough real decisions exist. It never
+    # becomes an active Skill without an explicit human publish action.
+    if len(reviews) >= 5 and len(positive) >= 3:
+        def values(key: str) -> str:
+            return "、".join(item["value"] for item in profile.learned_rules.get(key, [])[:5])
+        candidate = db.query(SkillCandidate).filter(SkillCandidate.tenant_id == product.tenant_id, SkillCandidate.profile_id == profile.id).first()
+        payload = {
+            "name": f"{product.brand_name or product.category} · 实战学习 Skill",
+            "scope": "brand" if product.brand_name else "category",
+            "brand_name": product.brand_name,
+            "category": product.category,
+            "product_id": None,
+            "description": f"由 {len(reviews)} 次真实采用、修改和淘汰记录归纳，发布前需人工审核。",
+            "design_principles": f"优先风格：{values('preferred_styles')}。成功特征：{values('successful_characteristics')}。",
+            "module_guidance": "",
+            "visual_rules": f"色彩：{values('preferred_palettes')}；构图：{values('preferred_compositions')}；光影：{values('preferred_lighting')}；商品呈现：{values('preferred_product_presentation')}。",
+            "copy_rules": "",
+            "negative_rules": values("avoid"),
+            "primary_color": "#1f7258", "accent_color": "#dceee5", "enabled": True,
+        }
+        if candidate:
+            candidate.name = payload["name"]; candidate.confidence = profile.confidence; candidate.sample_count = len(reviews); candidate.payload = payload
+            if candidate.status == "rejected": candidate.status = "pending"
+        else:
+            db.add(SkillCandidate(tenant_id=product.tenant_id, profile_id=profile.id, name=payload["name"], brand_name=product.brand_name, category=product.category, confidence=profile.confidence, sample_count=len(reviews), payload=payload))
+        db.commit()
     return profile
 
 
@@ -125,7 +151,7 @@ async def analyze_review(review_id: int) -> None:
   "strengths": ["被采用时可能值得复用的可观察特征"],
   "risks": ["被拒绝或需修改时可观察的问题"]
 }}"""
-        source = review.image_url.removeprefix("/uploads/")
+        source = review.image_url
         analysis = await get_llm().chat_vision(
             prompt,
             [source],
@@ -167,7 +193,7 @@ async def analyze_creative_feedback(feedback_id: int) -> None:
 原因：{'、'.join(feedback.reasons or []) or '未填写'}
 仅输出 JSON：{{"style_tags":[],"palette_tags":[],"composition_tags":[],"lighting_tags":[],"product_presentation_tags":[],"strengths":[],"risks":[]}}"""
         feedback.visual_analysis = await get_llm().chat_vision(
-            prompt, [feedback.image_url.removeprefix("/uploads/")],
+            prompt, [feedback.image_url],
             system_prompt="只提取可观察的视觉特征，输出 JSON。", temperature=0.2, max_tokens=1000, as_json=True,
         )
         feedback.learning_status = "completed"; db.commit(); _rebuild_profile(db, product)

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Arrow, Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva';
+import { Arrow, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
+import { Background, Controls, Handle, MiniMap, NodeResizer, Position, ReactFlow, SelectionMode, applyNodeChanges, type Node, type NodeProps } from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Award, BookOpen, Check, Download, Focus, Grid2X2, HelpCircle, ImagePlus,
-  Loader2, Palette, Redo2, Save, ShieldCheck, Sparkles, Trash2, Undo2, Upload, X,
+  ArrowLeft, Award, BookOpen, Check, Download, Focus, Grid2X2, Group, HelpCircle, ImagePlus,
+  CheckCircle2, ChevronDown, ChevronUp, Copy, Eye, EyeOff, Layers3, Loader2, Lock, Maximize2, Minus, Palette, Plus, Redo2, Save, ShieldCheck, Sparkles, Trash2, Type, Undo2, Ungroup, Unlock, Upload, X,
 } from 'lucide-react';
 import { creativeApi, mediaUrl, productApi } from '../api/client';
 import type { CanvasNodeRecord, CreativeFeedback, CreativeProject, LearnedDesignProfile, Product } from '../types';
@@ -55,11 +57,13 @@ function useHtmlImage(url?: string) {
   return image;
 }
 
-function CanvasPicture({ item, selected, onSelect, onChange }: {
+function CanvasPicture({ item, selected, onSelect, onChange, onMove, onMoveEnd }: {
   item: CanvasItem;
   selected: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onChange: (next: CanvasItem) => void;
+  onMove: (item: CanvasItem, x: number, y: number) => { x: number; y: number };
+  onMoveEnd: () => void;
 }) {
   const image = useHtmlImage(item.imageUrl);
   const shapeRef = useRef<Konva.Image>(null);
@@ -83,7 +87,7 @@ function CanvasPicture({ item, selected, onSelect, onChange }: {
       y={item.y}
       width={item.width}
       height={item.height}
-      draggable
+      draggable={!item.data.locked}
       stroke={selected ? '#087866' : border}
       strokeWidth={selected ? 5 : 3}
       shadowColor="#283a34"
@@ -92,7 +96,8 @@ function CanvasPicture({ item, selected, onSelect, onChange }: {
       shadowOffsetY={4}
       onClick={onSelect}
       onTap={onSelect}
-      onDragEnd={(event) => onChange({ ...item, x: event.target.x(), y: event.target.y() })}
+      onDragMove={(event) => { const point = onMove(item, event.target.x(), event.target.y()); event.target.position(point); }}
+      onDragEnd={(event) => { onMoveEnd(); onChange({ ...item, x: event.target.x(), y: event.target.y() }); }}
       onTransformEnd={() => {
         const shape = shapeRef.current;
         if (!shape) return;
@@ -102,8 +107,14 @@ function CanvasPicture({ item, selected, onSelect, onChange }: {
         onChange({ ...item, x: shape.x(), y: shape.y(), width: Math.max(80, shape.width() * scaleX), height: Math.max(80, shape.height() * scaleY) });
       }}
     />
-    {selected && <Transformer ref={transformerRef} rotateEnabled={false} flipEnabled={false} keepRatio borderStroke="#087866" anchorFill="#ffffff" anchorStroke="#087866" anchorSize={10} boundBoxFunc={(oldBox, newBox) => newBox.width < 80 || newBox.height < 80 ? oldBox : newBox} />}
+    {selected && !item.data.locked && <Transformer ref={transformerRef} rotateEnabled={false} flipEnabled={false} keepRatio borderStroke="#087866" anchorFill="#ffffff" anchorStroke="#087866" anchorSize={10} boundBoxFunc={(oldBox, newBox) => newBox.width < 80 || newBox.height < 80 ? oldBox : newBox} />}
   </>;
+}
+
+function CanvasText({ item, selected, onSelect, onChange }: { item: CanvasItem; selected: boolean; onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void; onChange: (next: CanvasItem) => void }) {
+  const textRef = useRef<Konva.Text>(null); const transformerRef = useRef<Konva.Transformer>(null);
+  useEffect(() => { if (selected && textRef.current && transformerRef.current) { transformerRef.current.nodes([textRef.current]); transformerRef.current.getLayer()?.batchDraw(); } }, [selected]);
+  return <><Text ref={textRef} id={item.id} x={item.x} y={item.y} width={item.width} height={item.height} text={String(item.data.text || item.label)} fontSize={Number(item.data.font_size || 42)} fontFamily={String(item.data.font_family || 'sans-serif')} fontStyle={item.data.bold ? 'bold' : 'normal'} fill={String(item.data.color || '#183028')} align={String(item.data.align || 'left')} lineHeight={Number(item.data.line_height || 1.25)} draggable={!item.data.locked} onClick={onSelect} onTap={onSelect} onDragEnd={(event) => onChange({ ...item, x: event.target.x(), y: event.target.y() })} onTransformEnd={() => { const node = textRef.current; if (!node) return; const scaleX = node.scaleX(); node.scaleX(1); node.scaleY(1); onChange({ ...item, x: node.x(), y: node.y(), width: Math.max(80, node.width() * scaleX) }); }} />{selected && !item.data.locked && <Transformer ref={transformerRef} rotateEnabled enabledAnchors={['middle-left', 'middle-right']} borderStroke="#087866" anchorFill="#fff" anchorStroke="#087866" />}</>;
 }
 
 function toItem(row: CanvasNodeRecord, feedback?: CreativeFeedback): CanvasItem {
@@ -126,6 +137,27 @@ function intersects(a: { x: number; y: number; width: number; height: number }, 
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
+type CommerceFlowData = { item: CanvasItem };
+function CommerceFlowNode({ data, selected }: NodeProps<Node<CommerceFlowData>>) {
+  const item = data.item; const isText = item.nodeType === 'text';
+  return <div className={`relative w-full h-full rounded-xl overflow-hidden bg-white shadow-md ${selected ? 'ring-2 ring-[#087866]' : ''} ${item.data.locked ? 'opacity-85' : ''}`}>
+    <NodeResizer isVisible={selected && !item.data.locked} minWidth={80} minHeight={60} color="#087866" />
+    <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-[#087866] !border-white" />
+    {isText ? <div className="w-full h-full p-3 whitespace-pre-wrap" style={{ fontSize: Number(item.data.font_size || 42), color: String(item.data.color || '#183028'), textAlign: String(item.data.align || 'left') as 'left', fontWeight: item.data.bold ? 700 : 400, lineHeight: Number(item.data.line_height || 1.25) }}>{String(item.data.text || item.label)}</div> : <><img src={mediaUrl(item.imageUrl || '')} draggable={false} className="w-full h-full object-contain pointer-events-none" /><div className="absolute left-2 bottom-2 max-w-[85%] truncate rounded bg-black/55 text-white px-2 py-1 text-[10px]">{item.label}</div></>}
+    {item.data.locked && <Lock size={13} className="absolute top-2 right-2 text-[#087866]" />}
+    <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-[#087866] !border-white" />
+  </div>;
+}
+const commerceNodeTypes = { commerce: CommerceFlowNode };
+
+function CommerceFlowCanvas({ items, setItems, selectedIds, setSelectedIds, viewport, setViewport }: { items: CanvasItem[]; setItems: React.Dispatch<React.SetStateAction<CanvasItem[]>>; selectedIds: string[]; setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>; viewport: Viewport; setViewport: React.Dispatch<React.SetStateAction<Viewport>> }) {
+  const nodes: Node<CommerceFlowData>[] = items.filter((item) => !item.data.hidden).map((item) => ({ id: item.id, type: 'commerce', position: { x: item.x, y: item.y }, width: item.width, height: item.height, selected: selectedIds.includes(item.id), draggable: !item.data.locked, data: { item } }));
+  const edges = items.filter((item) => item.parentNodeId && items.some((parent) => parent.id === item.parentNodeId)).map((item) => ({ id: `edge-${item.id}`, source: String(item.parentNodeId), target: item.id, style: { stroke: '#8b918b' } }));
+  return <div className="absolute inset-0 z-[5]"><ReactFlow nodes={nodes} edges={edges} nodeTypes={commerceNodeTypes} defaultViewport={viewport} minZoom={0.15} maxZoom={3} selectionMode={SelectionMode.Partial} panOnScroll selectionOnDrag panOnDrag={[1, 2]} multiSelectionKeyCode={['Meta', 'Control', 'Shift']} onNodesChange={(changes) => { const changed = applyNodeChanges(changes, nodes); setItems((current) => current.map((item) => { const node = changed.find((entry) => entry.id === item.id); return node ? { ...item, x: node.position.x, y: node.position.y, width: node.measured?.width || node.width || item.width, height: node.measured?.height || node.height || item.height } : item; })); setSelectedIds(changed.filter((node) => node.selected).map((node) => node.id)); }} onMoveEnd={(_, next) => setViewport(next)} fitViewOptions={{ padding: .18 }} deleteKeyCode={null}>
+    <Background color="#c8c3b8" gap={24} size={1} /><MiniMap pannable zoomable nodeColor={(node) => node.selected ? '#087866' : '#d7ddd8'} /><Controls showInteractive={false} />
+  </ReactFlow></div>;
+}
+
 export default function CreativeCanvasPage() {
   const projectId = Number(useParams().id);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -143,6 +175,7 @@ export default function CreativeCanvasPage() {
   const [viewport, setViewport] = useState<Viewport>({ x: 40, y: 40, zoom: 0.8 });
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 700 });
   const [selectionBox, setSelectionBox] = useState<SelectionBox>({ visible: false, x: 0, y: 0, width: 0, height: 0, startX: 0, startY: 0 });
+  const [guides, setGuides] = useState<{ vertical?: number; horizontal?: number }>({});
   const [prompt, setPrompt] = useState('保持商品包装、品牌名称和瓶身结构准确');
   const [visualTags, setVisualTags] = useState<string[]>(['高级克制', '东方雅致', '商品居中', '米白棚拍', '商业柔光']);
   const [showAdvancedPrompt, setShowAdvancedPrompt] = useState(false);
@@ -151,6 +184,9 @@ export default function CreativeCanvasPage() {
   const [autoSelectMaterials, setAutoSelectMaterials] = useState(true);
   const [lastGenerationBasis, setLastGenerationBasis] = useState<GenerationBasis | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [showLayers, setShowLayers] = useState(false);
+  const [showSafeArea, setShowSafeArea] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
   const [showWelcome, setShowWelcome] = useState(searchParams.get('welcome') === '1');
   const [workspaceMode, setWorkspaceMode] = useState<'design' | 'expert'>(() => localStorage.getItem('creative_workspace_mode') === 'expert' ? 'expert' : 'design');
@@ -160,6 +196,7 @@ export default function CreativeCanvasPage() {
   const [error, setError] = useState('');
 
   const selected = items.filter((item) => selectedIds.includes(item.id));
+  const selectedText = selected.length === 1 && selected[0].nodeType === 'text' ? selected[0] : null;
   const materials = items.filter((item) => ['product', 'product_image', 'detail_image', 'brand_asset', 'reference'].includes(item.nodeType));
   const results = items.filter((item) => ['generated', 'refined', 'deliverable'].includes(item.nodeType));
   const productMaterials = materials.filter((item) => ['product', 'product_image'].includes(item.nodeType));
@@ -207,7 +244,9 @@ export default function CreativeCanvasPage() {
   const save = useCallback(async (silent = false) => {
     if (!project) return;
     if (!silent) setBusy(true);
-    try { await creativeApi.saveCanvas(projectId, canvasPayload(), viewport); }
+    setSaveStatus('saving');
+    try { await creativeApi.saveCanvas(projectId, canvasPayload(), viewport); setSaveStatus('saved'); }
+    catch (error) { setSaveStatus('error'); throw error; }
     finally { if (!silent) setBusy(false); }
   }, [canvasPayload, project, projectId, viewport]);
 
@@ -231,6 +270,108 @@ export default function CreativeCanvasPage() {
     commitItems((current) => current.filter((item) => !selectedIds.includes(item.id))); setSelectedIds([]);
   }, [commitItems, selectedIds]);
 
+  const fitAll = useCallback(() => {
+    if (!items.length) { setViewport({ x: 40, y: 40, zoom: 0.8 }); return; }
+    const padding = 80;
+    const minX = Math.min(...items.map((item) => item.x));
+    const minY = Math.min(...items.map((item) => item.y));
+    const maxX = Math.max(...items.map((item) => item.x + item.width));
+    const maxY = Math.max(...items.map((item) => item.y + item.height));
+    const zoom = Math.max(MIN_ZOOM, Math.min(1.2, Math.min((canvasSize.width - padding * 2) / Math.max(maxX - minX, 1), (canvasSize.height - padding * 2) / Math.max(maxY - minY, 1))));
+    setViewport({ x: (canvasSize.width - (maxX - minX) * zoom) / 2 - minX * zoom, y: (canvasSize.height - (maxY - minY) * zoom) / 2 - minY * zoom, zoom });
+  }, [canvasSize, items]);
+
+  const changeZoom = useCallback((factor: number) => {
+    setViewport((current) => {
+      const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, current.zoom * factor));
+      const center = { x: canvasSize.width / 2, y: canvasSize.height / 2 };
+      const world = { x: (center.x - current.x) / current.zoom, y: (center.y - current.y) / current.zoom };
+      return { x: center.x - world.x * zoom, y: center.y - world.y * zoom, zoom };
+    });
+  }, [canvasSize]);
+
+  const duplicateSelected = useCallback(() => {
+    if (!selectedIds.length) return;
+    const copies = items.filter((item) => selectedIds.includes(item.id)).map((item) => ({ ...structuredClone(item), id: crypto.randomUUID().replaceAll('-', ''), parentNodeId: item.id, x: item.x + 36, y: item.y + 36, label: `${item.label} 副本`, data: { ...item.data, is_final: false } }));
+    commitItems((current) => [...current, ...copies]);
+    setSelectedIds(copies.map((item) => item.id));
+  }, [commitItems, items, selectedIds]);
+
+  const nudgeSelected = useCallback((x: number, y: number) => {
+    if (!selectedIds.length) return;
+    commitItems((current) => current.map((item) => selectedIds.includes(item.id) ? { ...item, x: item.x + x, y: item.y + y } : item));
+  }, [commitItems, selectedIds]);
+
+  const updateLayer = useCallback((id: string, changes: Record<string, unknown>) => {
+    commitItems((current) => current.map((item) => item.id === id ? { ...item, data: { ...item.data, ...changes } } : item));
+  }, [commitItems]);
+
+  const changeItem = useCallback((next: CanvasItem) => {
+    commitItems((current) => {
+      const previous = current.find((item) => item.id === next.id); const groupId = previous?.data.group_id;
+      if (!previous || !groupId) return current.map((item) => item.id === next.id ? next : item);
+      const deltaX = next.x - previous.x; const deltaY = next.y - previous.y;
+      return current.map((item) => item.id === next.id ? next : item.data.group_id === groupId ? { ...item, x: item.x + deltaX, y: item.y + deltaY } : item);
+    });
+  }, [commitItems]);
+
+  const addText = useCallback(() => {
+    const item: CanvasItem = { id: crypto.randomUUID().replaceAll('-', ''), nodeType: 'text', x: 120, y: 120, width: 420, height: 90, label: '双击后在右侧编辑标题', data: { text: '输入商品标题', font_size: 48, color: '#183028', align: 'left', line_height: 1.25 } };
+    commitItems((current) => [...current, item]); setSelectedIds([item.id]);
+  }, [commitItems]);
+
+  const groupSelected = useCallback(() => {
+    if (selectedIds.length < 2) return; const groupId = crypto.randomUUID().replaceAll('-', '');
+    commitItems((current) => current.map((item) => selectedIds.includes(item.id) ? { ...item, data: { ...item.data, group_id: groupId } } : item));
+  }, [commitItems, selectedIds]);
+  const ungroupSelected = useCallback(() => { commitItems((current) => current.map((item) => selectedIds.includes(item.id) ? { ...item, data: { ...item.data, group_id: undefined } } : item)); }, [commitItems, selectedIds]);
+
+  const moveLayer = useCallback((id: string, direction: 'up' | 'down') => {
+    commitItems((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      const target = direction === 'up' ? index + 1 : index - 1;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, [commitItems]);
+
+  const alignSelected = useCallback((mode: 'left' | 'center-x' | 'right' | 'top' | 'center-y' | 'bottom') => {
+    const targets = items.filter((item) => selectedIds.includes(item.id) && !item.data.locked);
+    if (targets.length < 2) return;
+    const left = Math.min(...targets.map((item) => item.x)); const right = Math.max(...targets.map((item) => item.x + item.width));
+    const top = Math.min(...targets.map((item) => item.y)); const bottom = Math.max(...targets.map((item) => item.y + item.height));
+    commitItems((current) => current.map((item) => !selectedIds.includes(item.id) || item.data.locked ? item : ({ ...item,
+      x: mode === 'left' ? left : mode === 'center-x' ? (left + right - item.width) / 2 : mode === 'right' ? right - item.width : item.x,
+      y: mode === 'top' ? top : mode === 'center-y' ? (top + bottom - item.height) / 2 : mode === 'bottom' ? bottom - item.height : item.y,
+    })));
+  }, [commitItems, items, selectedIds]);
+
+  const distributeSelected = useCallback((axis: 'horizontal' | 'vertical') => {
+    const targets = items.filter((item) => selectedIds.includes(item.id) && !item.data.locked).sort((a, b) => axis === 'horizontal' ? a.x - b.x : a.y - b.y);
+    if (targets.length < 3) return;
+    const first = targets[0]; const last = targets[targets.length - 1];
+    const occupied = targets.reduce((sum, item) => sum + (axis === 'horizontal' ? item.width : item.height), 0);
+    const span = axis === 'horizontal' ? last.x + last.width - first.x : last.y + last.height - first.y;
+    const gap = (span - occupied) / (targets.length - 1); let cursor = axis === 'horizontal' ? first.x : first.y;
+    const positions = new Map<string, number>();
+    targets.forEach((item) => { positions.set(item.id, cursor); cursor += (axis === 'horizontal' ? item.width : item.height) + gap; });
+    commitItems((current) => current.map((item) => positions.has(item.id) ? { ...item, [axis === 'horizontal' ? 'x' : 'y']: positions.get(item.id)! } : item));
+  }, [commitItems, items, selectedIds]);
+
+  const snapMove = useCallback((moving: CanvasItem, x: number, y: number) => {
+    const threshold = 7 / viewport.zoom; let nextX = x; let nextY = y; let vertical: number | undefined; let horizontal: number | undefined;
+    const movingX = [x, x + moving.width / 2, x + moving.width]; const movingY = [y, y + moving.height / 2, y + moving.height];
+    for (const other of items) {
+      if (other.id === moving.id || other.data.hidden) continue;
+      const targetX = [other.x, other.x + other.width / 2, other.x + other.width]; const targetY = [other.y, other.y + other.height / 2, other.y + other.height];
+      for (let sourceIndex = 0; sourceIndex < movingX.length; sourceIndex += 1) for (const target of targetX) if (Math.abs(movingX[sourceIndex] - target) < threshold) { nextX = target - [0, moving.width / 2, moving.width][sourceIndex]; vertical = target; }
+      for (let sourceIndex = 0; sourceIndex < movingY.length; sourceIndex += 1) for (const target of targetY) if (Math.abs(movingY[sourceIndex] - target) < threshold) { nextY = target - [0, moving.height / 2, moving.height][sourceIndex]; horizontal = target; }
+    }
+    setGuides({ vertical, horizontal }); return { x: nextX, y: nextY };
+  }, [items, viewport.zoom]);
+
   useEffect(() => {
     const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName || '');
     const down = (event: KeyboardEvent) => {
@@ -240,15 +381,21 @@ export default function CreativeCanvasPage() {
       if (command && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       else if (command && event.key.toLowerCase() === 'z' && event.shiftKey) { event.preventDefault(); redo(); }
       else if (command && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
+      else if (command && event.key.toLowerCase() === 'a') { event.preventDefault(); setSelectedIds(items.map((item) => item.id)); }
+      else if (command && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelected(); }
       else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
       else if (event.key === 'Escape') setSelectedIds([]);
       else if (event.key === '0') { event.preventDefault(); setViewport({ x: 40, y: 40, zoom: 0.8 }); }
+      else if (event.key === '1') { event.preventDefault(); fitAll(); }
+      else if (event.key === '=' || event.key === '+') { event.preventDefault(); changeZoom(1.15); }
+      else if (event.key === '-') { event.preventDefault(); changeZoom(1 / 1.15); }
+      else if (event.key.startsWith('Arrow')) { event.preventDefault(); const distance = event.shiftKey ? 10 : 1; nudgeSelected(event.key === 'ArrowLeft' ? -distance : event.key === 'ArrowRight' ? distance : 0, event.key === 'ArrowUp' ? -distance : event.key === 'ArrowDown' ? distance : 0); }
       else if (event.key === '?') setShowHelp(true);
     };
     const up = (event: KeyboardEvent) => { if (event.code === 'Space') setSpacePressed(false); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, [redo, removeSelected, save, undo]);
+  }, [changeZoom, duplicateSelected, fitAll, items, nudgeSelected, redo, removeSelected, save, undo]);
 
   async function generate() {
     setBusy(true); setError('');
@@ -344,7 +491,7 @@ export default function CreativeCanvasPage() {
   return <div className="fixed inset-0 left-60 bg-[#f4f1eb] z-10 flex flex-col text-[#242622]">
     <header className="h-16 bg-white border-b border-[#ded9cf] px-5 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3"><Link to="/creative-projects"><ArrowLeft size={18} /></Link><div><div className="font-medium flex items-center gap-2">{project.name}<span className={`text-[11px] px-2 py-0.5 rounded-full ${project.status === 'pending_review' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}>{project.status === 'pending_review' ? '待审核' : '创作中'}</span></div><div className="text-xs text-[#77736b]">{project.platform} · {project.output_width}×{project.output_height}{profile ? ` · 已学习 ${profile.sample_count} 个设计选择` : ' · 正在积累品牌偏好'}</div></div></div>
-      <div className="flex gap-2"><div className="flex rounded-lg bg-[#ece9e2] p-1 mr-1"><button onClick={() => changeWorkspaceMode('design')} className={`px-3 py-1.5 rounded-md text-xs ${workspaceMode === 'design' ? 'bg-white shadow-sm font-medium' : 'text-[#77736b]'}`}>设计模式</button><button onClick={() => changeWorkspaceMode('expert')} className={`px-3 py-1.5 rounded-md text-xs ${workspaceMode === 'expert' ? 'bg-white shadow-sm font-medium' : 'text-[#77736b]'}`}>专家模式</button></div><button className="btn-secondary" onClick={undo} title="撤销 ⌘Z"><Undo2 size={14} /></button><button className="btn-secondary" onClick={redo} title="重做 ⇧⌘Z"><Redo2 size={14} /></button><button className="btn-secondary" onClick={arrange}><Grid2X2 size={14} />整理</button><button className="btn-secondary" onClick={focusSelected}><Focus size={14} />聚焦</button><button className="btn-secondary" onClick={() => save()}><Save size={14} />保存</button>{workspaceMode === 'expert' && <button className="btn-secondary" onClick={() => setShowHelp(true)}><HelpCircle size={14} />快捷键</button>}</div>
+      <div className="flex gap-2 items-center"><span className={`text-[11px] flex items-center gap-1 mr-1 ${saveStatus === 'error' ? 'text-red-600' : 'text-[#77736b]'}`}>{saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : saveStatus === 'saved' ? <CheckCircle2 size={12} className="text-emerald-700" /> : <X size={12} />}{saveStatus === 'saving' ? '保存中' : saveStatus === 'saved' ? '已自动保存' : '保存失败'}</span><div className="flex rounded-lg bg-[#ece9e2] p-1 mr-1"><button onClick={() => changeWorkspaceMode('design')} className={`px-3 py-1.5 rounded-md text-xs ${workspaceMode === 'design' ? 'bg-white shadow-sm font-medium' : 'text-[#77736b]'}`}>设计模式</button><button onClick={() => changeWorkspaceMode('expert')} className={`px-3 py-1.5 rounded-md text-xs ${workspaceMode === 'expert' ? 'bg-white shadow-sm font-medium' : 'text-[#77736b]'}`}>专家模式</button></div><button className="btn-secondary" onClick={undo} title="撤销 ⌘Z"><Undo2 size={14} /></button><button className="btn-secondary" onClick={redo} title="重做 ⇧⌘Z"><Redo2 size={14} /></button><button className="btn-secondary" onClick={duplicateSelected} disabled={!selectedIds.length} title="复制所选 ⌘D"><Copy size={14} /></button><button className="btn-secondary" onClick={arrange}><Grid2X2 size={14} />整理</button><button className="btn-secondary" onClick={focusSelected}><Focus size={14} />聚焦</button><button className={`btn-secondary ${showSafeArea ? 'bg-[#e8f2ef]' : ''}`} onClick={() => setShowSafeArea((current) => !current)}><Maximize2 size={14} />安全区</button><button className={`btn-secondary ${showLayers ? 'bg-[#e8f2ef]' : ''}`} onClick={() => setShowLayers((current) => !current)}><Layers3 size={14} />图层</button><button className="btn-secondary" onClick={() => save()}><Save size={14} />保存</button><button className="btn-secondary" onClick={() => setShowHelp(true)}><HelpCircle size={14} /></button></div>
     </header>
 
     <div className="h-12 bg-[#f9f7f2] border-b border-[#ded9cf] px-5 flex items-center gap-3 text-xs overflow-x-auto">
@@ -364,11 +511,12 @@ export default function CreativeCanvasPage() {
           {supportingMaterials.map((item) => <button key={item.id} onClick={() => focusItem(item)} className={`relative w-full rounded-xl overflow-hidden border-2 text-left bg-[#f7f6f2] ${selectedIds.includes(item.id) ? 'border-[#087866]' : 'border-transparent'}`}><span className="absolute top-2 left-2 z-10 rounded-full bg-white/90 text-[#5f5c55] px-2 py-0.5 text-[10px]">{item.nodeType === 'brand_asset' ? '品牌素材' : item.nodeType === 'reference' ? '参考图' : '详情素材'}</span><img src={mediaUrl(item.imageUrl || '')} className="w-full h-28 object-contain" /><div className="px-2 py-1.5 text-xs truncate">{item.label}</div></button>)}
           {!materials.length && <div className="text-xs text-[#99958d] py-8 text-center">暂无素材</div>}
         </div>
-        <div className="p-3 border-t border-[#eee9df]"><label className="btn-secondary w-full justify-center cursor-pointer"><ImagePlus size={14} />添加参考图<input type="file" accept="image/*" className="hidden" onChange={(event) => addReference(event.target.files?.[0] || null)} /></label></div>
+        <div className="p-3 border-t border-[#eee9df] grid gap-2"><button className="btn-secondary w-full justify-center" onClick={addText}><Type size={14} />添加文字</button><label className="btn-secondary w-full justify-center cursor-pointer"><ImagePlus size={14} />添加参考图<input type="file" accept="image/*" className="hidden" onChange={(event) => addReference(event.target.files?.[0] || null)} /></label></div>
       </aside>
 
       <main ref={canvasRef} className={`flex-1 min-w-0 relative overflow-hidden bg-[#ebe8e1] ${dragOver ? 'ring-4 ring-inset ring-[#087866]/40' : ''}`} style={{ backgroundImage: 'radial-gradient(#c8c3b8 1px, transparent 1px)', backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`, backgroundPosition: `${viewport.x}px ${viewport.y}px` }} onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={(event) => { event.preventDefault(); setDragOver(false); void addReferenceFiles(Array.from(event.dataTransfer.files)); }}>
         {error && <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-red-50 text-red-700 px-4 py-2 rounded-lg shadow">{error}</div>}
+        <CommerceFlowCanvas items={items} setItems={setItemsState} selectedIds={selectedIds} setSelectedIds={setSelectedIds} viewport={viewport} setViewport={setViewport} />
         <Stage
           ref={stageRef} width={canvasSize.width} height={canvasSize.height} x={viewport.x} y={viewport.y} scaleX={viewport.zoom} scaleY={viewport.zoom}
           draggable={workspaceMode === 'design' || spacePressed}
@@ -395,18 +543,25 @@ export default function CreativeCanvasPage() {
           }}
         >
           <Layer>
+            {showSafeArea && <><Rect x={0} y={0} width={project.output_width} height={project.output_height} stroke="#087866" strokeWidth={2 / viewport.zoom} dash={[12 / viewport.zoom, 8 / viewport.zoom]} listening={false} /><Rect x={30} y={30} width={Math.max(0, project.output_width - 60)} height={Math.max(0, project.output_height - 60)} stroke="#e3a82b" strokeWidth={1 / viewport.zoom} dash={[6 / viewport.zoom, 5 / viewport.zoom]} listening={false} /></>}
             {workspaceMode === 'expert' && items.filter((item) => item.parentNodeId).map((item) => { const parent = items.find((entry) => entry.id === item.parentNodeId); return parent ? <Arrow key={`relation-${item.id}`} points={[parent.x + parent.width, parent.y + parent.height / 2, item.x, item.y + item.height / 2]} stroke="#8b918b" fill="#8b918b" opacity={0.55} pointerLength={8} pointerWidth={8} strokeWidth={2} listening={false} /> : null; })}
-            {items.map((item) => <CanvasPicture key={item.id} item={item} selected={selectedIds.includes(item.id)} onSelect={(event) => selectItem(item.id, event)} onChange={(next) => commitItems((current) => current.map((entry) => entry.id === next.id ? next : entry))} />)}
+            {items.filter((item) => !item.data.hidden).map((item) => item.nodeType === 'text' ? <CanvasText key={item.id} item={item} selected={selectedIds.includes(item.id)} onSelect={(event) => selectItem(item.id, event)} onChange={changeItem} /> : <CanvasPicture key={item.id} item={item} selected={selectedIds.includes(item.id)} onSelect={(event) => selectItem(item.id, event)} onMove={snapMove} onMoveEnd={() => setGuides({})} onChange={changeItem} />)}
+            {guides.vertical !== undefined && <Line points={[guides.vertical, -viewport.y / viewport.zoom, guides.vertical, (canvasSize.height - viewport.y) / viewport.zoom]} stroke="#ef3f75" strokeWidth={1 / viewport.zoom} dash={[5 / viewport.zoom, 4 / viewport.zoom]} listening={false} />}
+            {guides.horizontal !== undefined && <Line points={[-viewport.x / viewport.zoom, guides.horizontal, (canvasSize.width - viewport.x) / viewport.zoom, guides.horizontal]} stroke="#ef3f75" strokeWidth={1 / viewport.zoom} dash={[5 / viewport.zoom, 4 / viewport.zoom]} listening={false} />}
             {selectionBox.visible && <Rect x={selectionBox.x} y={selectionBox.y} width={selectionBox.width} height={selectionBox.height} fill="rgba(8,120,102,0.12)" stroke="#087866" dash={[8, 5]} />}
           </Layer>
         </Stage>
         <div className="absolute top-4 left-4 bg-white/95 shadow-sm border border-[#ded9cf] rounded-xl px-4 py-3 text-xs text-[#5f5c55] max-w-sm"><span className="font-medium text-[#262824]">{workspaceMode === 'design' ? '设计模式：' : '专家模式：'}</span>{workspaceMode === 'design' ? '空白处直接拖动画布，拖入参考图，点击图片后在右侧生成。' : '可框选多张图片、查看生成关系，并组合多个参考进行分支探索。'}</div>
+        {!!selectedIds.length && <div className="absolute top-4 right-4 bg-[#087866] text-white shadow rounded-full px-3 py-1.5 text-xs">已选择 {selectedIds.length} 项 · 方向键微调</div>}
+        {selectedIds.length >= 2 && !showLayers && <div className="absolute top-14 right-4 z-10 bg-white/95 border border-[#ded9cf] shadow rounded-xl p-1 flex items-center gap-1 text-[11px]"><button className="px-2 py-1.5 rounded-lg hover:bg-[#edf5f2] flex gap-1" onClick={groupSelected}><Group size={13} />组合</button><button className="px-2 py-1.5 rounded-lg hover:bg-[#edf5f2] flex gap-1" onClick={ungroupSelected}><Ungroup size={13} />解组</button><span className="w-px h-5 bg-[#ded9cf]" /><span className="px-1 text-[#77736b]">对齐</span>{[['左', 'left'], ['水平中', 'center-x'], ['右', 'right'], ['上', 'top'], ['垂直中', 'center-y'], ['下', 'bottom']].map(([label, mode]) => <button key={mode} className="px-2 py-1.5 rounded-lg hover:bg-[#edf5f2]" onClick={() => alignSelected(mode as Parameters<typeof alignSelected>[0])}>{label}</button>)}{selectedIds.length >= 3 && <><span className="w-px h-5 bg-[#ded9cf]" /><button className="px-2 py-1.5 rounded-lg hover:bg-[#edf5f2]" onClick={() => distributeSelected('horizontal')}>水平分布</button><button className="px-2 py-1.5 rounded-lg hover:bg-[#edf5f2]" onClick={() => distributeSelected('vertical')}>垂直分布</button></>}</div>}
+        {showLayers && <div className="absolute top-14 right-4 z-20 w-72 max-h-[70%] overflow-hidden bg-white/95 backdrop-blur border border-[#ded9cf] rounded-2xl shadow-xl flex flex-col"><div className="px-4 py-3 border-b border-[#eee9df] flex justify-between items-center"><div><div className="font-medium text-sm">图层</div><div className="text-[10px] text-[#88847c]">上方图层显示在画面最前</div></div><button onClick={() => setShowLayers(false)}><X size={15} /></button></div><div className="overflow-y-auto p-2">{[...items].reverse().map((item) => <button key={item.id} onClick={() => setSelectedIds([item.id])} className={`w-full grid grid-cols-[40px_1fr_auto] gap-2 items-center rounded-xl p-2 text-left ${selectedIds.includes(item.id) ? 'bg-[#e8f2ef]' : 'hover:bg-[#f5f3ee]'}`}><img src={mediaUrl(item.imageUrl || '')} className="w-10 h-10 rounded-lg object-cover bg-[#eee]" /><span className="min-w-0"><span className="block text-xs truncate">{item.label}</span><span className="block text-[10px] text-[#99958d]">{item.nodeType}</span></span><span className="flex items-center" onClick={(event) => event.stopPropagation()}><span role="button" tabIndex={0} className="p-1.5" title={item.data.hidden ? '显示' : '隐藏'} onClick={() => updateLayer(item.id, { hidden: !item.data.hidden })}>{item.data.hidden ? <EyeOff size={13} /> : <Eye size={13} />}</span><span role="button" tabIndex={0} className="p-1.5" title={item.data.locked ? '解锁' : '锁定'} onClick={() => updateLayer(item.id, { locked: !item.data.locked })}>{item.data.locked ? <Lock size={13} /> : <Unlock size={13} />}</span><span role="button" tabIndex={0} className="p-1" title="上移" onClick={() => moveLayer(item.id, 'up')}><ChevronUp size={13} /></span><span role="button" tabIndex={0} className="p-1" title="下移" onClick={() => moveLayer(item.id, 'down')}><ChevronDown size={13} /></span></span></button>)}</div></div>}
         {dragOver && <div className="absolute inset-0 z-20 bg-[#087866]/10 grid place-items-center pointer-events-none"><div className="bg-white rounded-2xl shadow-xl px-8 py-6 font-medium text-[#087866]"><ImagePlus className="mx-auto mb-2" />松开即可加入参考图片</div></div>}
-        <div className="absolute bottom-4 left-4 bg-white/95 shadow rounded-lg px-3 py-2 text-xs text-[#69665f]">{workspaceMode === 'design' ? '拖动空白移动画布 · 拖动图片整理 · 滚轮缩放' : '空白处框选 · Shift 多选 · Space 拖动画布'} · {Math.round(viewport.zoom * 100)}%</div>
+        <div className="absolute bottom-4 left-4 bg-white/95 shadow rounded-xl p-1 flex items-center gap-1 text-xs text-[#69665f]"><button className="p-2 rounded-lg hover:bg-[#efede7]" onClick={() => changeZoom(1 / 1.15)} title="缩小 -"><Minus size={15} /></button><button className="w-14 py-2 rounded-lg hover:bg-[#efede7]" onClick={() => setViewport((current) => ({ ...current, zoom: 1 }))} title="恢复 100%">{Math.round(viewport.zoom * 100)}%</button><button className="p-2 rounded-lg hover:bg-[#efede7]" onClick={() => changeZoom(1.15)} title="放大 +"><Plus size={15} /></button><span className="w-px h-5 bg-[#ded9cf] mx-1" /><button className="p-2 rounded-lg hover:bg-[#efede7] flex items-center gap-1" onClick={fitAll} title="适配全部 1"><Maximize2 size={15} />适配</button></div>
       </main>
 
       <aside className="w-80 bg-white border-l border-[#ded9cf] flex flex-col">
         <div className="p-4 border-b border-[#eee9df]"><div className="font-medium">生成视觉方案</div><div className="text-xs text-[#77736b] mt-1">先选择生成目标，系统会自动匹配正确素材。</div></div>
+        {selectedText && <div className="p-4 border-b border-[#eee9df] space-y-3"><div className="text-sm font-medium">文字属性</div><textarea className="input w-full min-h-20" value={String(selectedText.data.text || '')} onChange={(event) => updateLayer(selectedText.id, { text: event.target.value })} /><label className="block text-xs">字号 · {Number(selectedText.data.font_size || 42)}px<input className="w-full mt-2" type="range" min="12" max="160" value={Number(selectedText.data.font_size || 42)} onChange={(event) => updateLayer(selectedText.id, { font_size: Number(event.target.value) })} /></label><div className="grid grid-cols-2 gap-2"><label className="text-xs">颜色<input className="w-full h-10 mt-1" type="color" value={String(selectedText.data.color || '#183028')} onChange={(event) => updateLayer(selectedText.id, { color: event.target.value })} /></label><label className="text-xs">对齐<select className="input w-full mt-1" value={String(selectedText.data.align || 'left')} onChange={(event) => updateLayer(selectedText.id, { align: event.target.value })}><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label></div><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(selectedText.data.bold)} onChange={(event) => updateLayer(selectedText.id, { bold: event.target.checked })} />粗体</label><button className="btn-secondary w-full justify-center text-red-600" onClick={removeSelected}><Trash2 size={14} />删除文字</button></div>}
         <div className="p-4 space-y-4 overflow-y-auto">
           <div><label className="text-xs font-medium text-[#55534e]">1 · 想完成什么</label><button onClick={() => setAction('生成主图套系')} className={`w-full mt-2 rounded-xl border p-3 text-left ${action === '生成主图套系' ? 'border-[#087866] bg-[#edf5f2]' : 'border-[#ded9cf] hover:border-[#9ebbb1]'}`}><span className="block text-sm font-medium text-[#205f52]">一键生成主图套系</span><span className="block text-[11px] text-[#77736b] mt-1">一次生成：主封面、核心卖点、套装内容、成分质地、使用场景</span></button><div className="mt-3 text-[11px] font-medium text-[#77736b]">单张主图探索 · 每次生成 A/B/C</div><div className="grid grid-cols-2 gap-2 mt-2">{['主图·主封面', '主图·核心卖点', '主图·套装内容', '主图·成分质地', '主图·使用场景'].map((item) => <button key={item} onClick={() => setAction(item)} className={`rounded-xl border px-3 py-2.5 text-xs text-left ${action === item ? 'border-[#087866] bg-[#edf5f2] text-[#086c5c]' : 'border-[#ded9cf] hover:border-[#9ebbb1]'}`}>{item.replace('主图·', '')}</button>)}</div><div className="mt-3 text-[11px] font-medium text-[#77736b]">详情页模块 · 每次生成 A/B/C</div><div className="grid grid-cols-2 gap-2 mt-2">{['详情页·首屏', '详情页·核心卖点', '详情页·成分功效', '详情页·使用场景', '详情页·使用方法'].map((item) => <button key={item} onClick={() => setAction(item)} className={`rounded-xl border px-3 py-2.5 text-xs text-left ${action === item ? 'border-[#087866] bg-[#edf5f2] text-[#086c5c]' : 'border-[#ded9cf] hover:border-[#9ebbb1]'}`}>{item.replace('详情页·', '')}</button>)}</div></div>
           <div className="rounded-xl bg-[#f4f7f5] border border-[#dce9e4] p-3"><label className="flex items-start gap-2 cursor-pointer"><input type="checkbox" className="mt-0.5" checked={autoSelectMaterials} onChange={(event) => setAutoSelectMaterials(event.target.checked)} /><span><span className="block text-xs font-medium text-[#315e54]">自动匹配生成素材（推荐）</span><span className="block text-[11px] leading-4 text-[#6d7d77] mt-1">{action.startsWith('详情页') ? `自动使用全部商品原图，并优先加入已定稿主图；选中的图片作为额外参考。` : `自动使用全部 ${productMaterials.length} 张商品原图；选中的图片仅作为额外参考。`}</span></span></label></div>
@@ -425,6 +580,6 @@ export default function CreativeCanvasPage() {
 
     {showWelcome && <div className="absolute inset-0 z-50 bg-black/35 grid place-items-center p-6"><div className="bg-white rounded-3xl shadow-2xl w-[620px] max-w-full overflow-hidden"><div className="bg-[#0b7563] text-white p-7"><div className="text-xs opacity-75 mb-2">项目已准备完成</div><div className="text-2xl font-medium">不用从空白画布开始</div><p className="text-sm opacity-85 mt-2">商品、品牌和已有设计偏好已经自动进入本次任务。</p></div><div className="p-7"><div className="grid grid-cols-3 gap-4">{[[ShieldCheck, '选主体', '点击商品图；不选时默认使用主图'], [ImagePlus, '加参考', '需要时添加风格、构图或场景参考'], [Sparkles, '出方案', '描述效果，生成后采用、淘汰或继续调整']].map(([Icon, title, description]) => { const StepIcon = Icon as typeof ShieldCheck; return <div key={String(title)} className="rounded-2xl bg-[#f5f3ee] p-4"><StepIcon size={21} className="text-[#087866] mb-3" /><div className="font-medium text-sm">{String(title)}</div><div className="text-xs text-[#77736b] leading-5 mt-1">{String(description)}</div></div>; })}</div><div className="mt-5 rounded-xl bg-amber-50 text-amber-800 px-4 py-3 text-xs">当前使用本地视觉草案合成验证工作流；接入正式生图模型后，换背景、场景生成和方案变体会输出真正的AI视觉结果。</div><button className="btn-primary w-full justify-center py-3 mt-5" onClick={closeWelcome}>开始设计</button></div></div></div>}
 
-    {showHelp && <div className="absolute inset-0 z-50 bg-black/30 grid place-items-center" onClick={() => setShowHelp(false)}><div className="bg-white rounded-2xl shadow-xl w-[460px] p-6" onClick={(event) => event.stopPropagation()}><div className="flex justify-between items-center mb-5"><div><div className="text-lg font-medium">画布辅助操作</div><div className="text-xs text-[#77736b] mt-1">不记快捷键也能完成主要流程</div></div><button onClick={() => setShowHelp(false)}><X size={18} /></button></div><div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">{[['Space', '拖动画布'], ['滚轮', '以鼠标为中心缩放'], ['Shift + 点击', '多选图片'], ['拖动空白', '框选图片'], ['⌘/Ctrl + Z', '撤销'], ['⇧⌘/Ctrl + Z', '重做'], ['⌘/Ctrl + S', '立即保存'], ['Delete', '移出画布'], ['Esc', '取消选择'], ['0', '重置视图'], ['?', '打开帮助'], ['点击左侧素材', '快速定位']].map(([key, value]) => <div key={key} className="contents"><kbd className="bg-[#f1efe9] rounded px-2 py-1 text-xs">{key}</kbd><span>{value}</span></div>)}</div></div></div>}
+    {showHelp && <div className="absolute inset-0 z-50 bg-black/30 grid place-items-center" onClick={() => setShowHelp(false)}><div className="bg-white rounded-2xl shadow-xl w-[520px] p-6" onClick={(event) => event.stopPropagation()}><div className="flex justify-between items-center mb-5"><div><div className="text-lg font-medium">画布辅助操作</div><div className="text-xs text-[#77736b] mt-1">所有高频操作均有按钮，也可使用快捷键</div></div><button onClick={() => setShowHelp(false)}><X size={18} /></button></div><div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">{[['Space', '拖动画布'], ['滚轮 / + / -', '缩放画布'], ['Shift + 点击', '多选图片'], ['拖动空白', '框选图片'], ['方向键', '移动 1px'], ['Shift + 方向键', '移动 10px'], ['⌘/Ctrl + A', '全选'], ['⌘/Ctrl + D', '复制所选'], ['⌘/Ctrl + Z', '撤销'], ['⇧⌘/Ctrl + Z', '重做'], ['⌘/Ctrl + S', '立即保存'], ['Delete', '移出画布'], ['Esc', '取消选择'], ['0', '重置视图'], ['1', '适配全部内容'], ['点击左侧素材', '快速定位']].map(([key, value]) => <div key={key} className="contents"><kbd className="bg-[#f1efe9] rounded px-2 py-1 text-xs">{key}</kbd><span>{value}</span></div>)}</div></div></div>}
   </div>;
 }

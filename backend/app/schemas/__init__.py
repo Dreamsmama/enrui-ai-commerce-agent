@@ -59,6 +59,24 @@ class ProductOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BrandVisualProfileCreate(BaseModel):
+    brand_name: str
+    logo_url: str = ""
+    primary_color: str = "#1C6F56"
+    accent_color: str = "#E2EFE8"
+    typography: str = "现代中文黑体，标题克制醒目"
+    visual_keywords: list[str] = Field(default_factory=list)
+    forbidden_elements: list[str] = Field(default_factory=list)
+    tone_notes: str = ""
+
+
+class BrandVisualProfileOut(BrandVisualProfileCreate):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
 # ── Generation ───────────────────────────────────────────
 
 class GenerationOut(BaseModel):
@@ -160,6 +178,7 @@ class DesignSkillCreate(BaseModel):
 
 class DesignSkillOut(DesignSkillCreate):
     id: int
+    version: int = 1
     created_at: datetime
     updated_at: datetime
 
@@ -206,6 +225,53 @@ class LearnedDesignProfileOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SkillCandidateOut(BaseModel):
+    id: int
+    profile_id: int
+    name: str
+    brand_name: str
+    category: str
+    confidence: float
+    sample_count: int
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    published_skill_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class DetailPageTemplateCreate(BaseModel):
+    project_id: int
+    name: str = Field(..., min_length=1, max_length=256)
+    description: str = ""
+
+
+class DetailPageTemplateApply(BaseModel):
+    product_id: int
+    project_name: str = ""
+
+
+class DetailPageTemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    category: str
+    brand_name: str
+    platform: str
+    output_width: int
+    output_height: int
+    source_project_id: Optional[int] = None
+    modules: list[dict[str, Any]] = Field(default_factory=list)
+    variables: list[dict[str, Any]] = Field(default_factory=list)
+    conditions: dict[str, Any] = Field(default_factory=dict)
+    usage_count: int
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class CreativeProjectCreate(BaseModel):
     product_id: int
     name: str = Field(..., min_length=1, max_length=256)
@@ -218,11 +284,58 @@ class CreativeProjectCreate(BaseModel):
 class CreativeProjectOut(CreativeProjectCreate):
     id: int
     status: str
+    review_status: str = "draft"
+    review_round: int = 0
     viewport: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class StoryboardModuleCreate(BaseModel):
+    sort_order: int = 0
+    module_type: str
+    title: str
+    objective: str = ""
+    content_guidance: str = ""
+    visual_direction: str = ""
+    production_method: str = "ai_image"
+    required: bool = False
+
+
+class StoryboardModuleOut(StoryboardModuleCreate):
+    id: int
+    project_id: int
+    status: str
+    preview_node_id: Optional[str] = None
+    final_node_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CreativePlanOut(BaseModel):
+    id: int
+    project_id: int
+    product_understanding: dict[str, Any] = Field(default_factory=dict)
+    strategy: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    modules: list[StoryboardModuleOut] = Field(default_factory=list)
+
+
+class StoryboardUpdateRequest(BaseModel):
+    modules: list[StoryboardModuleCreate]
+
+
+class StoryboardModuleSelectionRequest(BaseModel):
+    node_id: str
+    approve: bool = False
+
+
+class StoryboardBatchCreate(BaseModel):
+    module_ids: list[int] = Field(default_factory=list)
 
 
 class CanvasNodeCreate(BaseModel):
@@ -256,7 +369,36 @@ class CreativeGenerateRequest(BaseModel):
     selected_node_ids: list[str] = Field(default_factory=list)
     parent_node_id: Optional[str] = None
     auto_select_materials: bool = True
+    module_id: Optional[int] = None
     count: int = Field(default=3, ge=1, le=6)
+    product_lock: str = Field(default="strict", pattern="^(strict|balanced|creative)$")
+    variation_axis: str = Field(default="composition", pattern="^(composition|scene|color|model|lighting)$")
+    generation_stage: str = Field(default="preview", pattern="^(preview|final)$")
+
+
+class StoryboardQuickEditRequest(BaseModel):
+    node_id: str
+    replacement_node_id: Optional[str] = None
+    headline: str = ""
+    subtitle: str = ""
+    zoom: float = Field(default=1.0, ge=1.0, le=2.0)
+    offset_x: float = Field(default=0.0, ge=-1.0, le=1.0)
+    offset_y: float = Field(default=0.0, ge=-1.0, le=1.0)
+    text_x: float = Field(default=0.08, ge=0.0, le=0.9)
+    text_y: float = Field(default=0.78, ge=0.0, le=0.95)
+    font_size: int = Field(default=42, ge=18, le=96)
+    text_color: str = "#183028"
+    text_align: str = "left"
+    text_background: bool = True
+
+
+class StoryboardStyleRequest(BaseModel):
+    name: str = "整套风格调整"
+    primary_color: str = "#1C6F56"
+    accent_color: str = "#E2EFE8"
+    typography: str = "克制现代"
+    whitespace: int = Field(default=50, ge=0, le=100)
+    copy_density: int = Field(default=50, ge=0, le=100)
 
 
 class CreativeGenerationOut(BaseModel):
@@ -308,9 +450,26 @@ class ProductAssetOut(BaseModel):
     mime_type: str
     description: str
     tags: list[str] = []
+    material_role: str = "auto"
+    priority: int = 0
+    locked: bool = False
+    excluded: bool = False
+    benchmark_role: str = "none"
+    protection: dict[str, Any] = {}
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProductAssetUpdate(BaseModel):
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    material_role: str = "auto"
+    priority: int = 0
+    locked: bool = False
+    excluded: bool = False
+    benchmark_role: str = "none"
+    protection: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Dashboard ────────────────────────────────────────────

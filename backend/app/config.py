@@ -28,8 +28,20 @@ class Settings(BaseSettings):
     image_generation_base_url: str = ""
     image_generation_api_key: str = ""
     image_generation_model: str = ""
+    image_product_model: str = ""
+    image_portrait_model: str = ""
+    image_edit_model: str = ""
+    image_upscale_model: str = ""
     image_generation_timeout_seconds: float = 240.0
     image_generation_watermark: bool = False
+    image_generation_unit_cost_cny: float = 0.2
+    generation_parameter_version: str = "commerce-image-v2"
+    approval_webhook_url: str = ""
+    volc_billing_api_url: str = ""
+    volc_billing_api_token: str = ""
+    volc_billing_account_id: str = ""
+    tenant_monthly_budget_cny: float = 1000.0
+    tenant_max_concurrent_generations: int = 2
     generation_max_attempts: int = 3
     max_upload_mb: int = 25
     auth_secret: str = "change-this-secret-in-production"
@@ -41,6 +53,22 @@ class Settings(BaseSettings):
 
     upload_dir: str = "./uploads"
     database_url: str = "sqlite:///./commerce_agent.db"
+    require_postgres: bool = False
+    require_online_services: bool = False
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
+    database_pool_recycle_seconds: int = 1800
+
+    redis_url: str = ""
+    redis_key_prefix: str = "enrui-ai-commerce-agent:"
+
+    storage_provider: str = "local"
+    aliyun_oss_region: str = ""
+    aliyun_oss_endpoint: str = ""
+    aliyun_oss_access_key_id: str = ""
+    aliyun_oss_access_key_secret: str = ""
+    aliyun_oss_bucket_name: str = ""
+    aliyun_oss_prefix: str = "enrui-ai-commerce-agent/"
 
     @property
     def upload_path(self) -> Path:

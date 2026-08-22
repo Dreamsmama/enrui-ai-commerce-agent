@@ -4,6 +4,17 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'canvas-vendor': ['konva', 'react-konva', '@xyflow/react'],
+          'markdown-vendor': ['react-markdown', 'remark-gfm'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

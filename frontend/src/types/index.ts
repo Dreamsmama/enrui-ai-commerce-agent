@@ -32,6 +32,57 @@ export interface ProductCreate {
   learned_profile_enabled?: boolean;
 }
 
+export interface StoryboardModule {
+  id: number;
+  project_id: number;
+  sort_order: number;
+  module_type: string;
+  title: string;
+  objective: string;
+  content_guidance: string;
+  visual_direction: string;
+  production_method: string;
+  required: boolean;
+  status: string;
+  preview_node_id: string | null;
+  final_node_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreativePlan {
+  id: number;
+  project_id: number;
+  product_understanding: Record<string, unknown>;
+  strategy: Record<string, unknown>;
+  status: string;
+  modules: StoryboardModule[];
+}
+
+export interface StoryboardBatchJob {
+  id: string;
+  project_id: number;
+  status: string;
+  module_ids: number[];
+  module_results: Array<{ module_id: number; status: string; error?: string }>;
+  total: number;
+  completed: number;
+  failed: number;
+  current_module_id: number | null;
+  stop_requested: boolean;
+}
+
+export interface ComplianceReport {
+  status: 'passed' | 'review' | 'blocked';
+  score: number;
+  high_count: number;
+  medium_count: number;
+  issues: Array<{ module_id: number; module_title: string; severity: 'high' | 'medium'; type: string; claim: string; message: string; sources: Array<{ id: number; title: string; doc_type: string }> }>;
+  knowledge_sources: Array<{ id: number; title: string; doc_type: string }>;
+  visual_quality?: { status: 'passed' | 'review' | 'blocked'; score: number; checked_count: number; high_count: number; medium_count: number; issues: Array<{ module_id: number; module_title: string; severity: 'high' | 'medium'; type: string; message: string }> };
+  product_consistency?: { status: 'passed' | 'review' | 'blocked' | 'unavailable'; score?: number; checked_count: number; summary?: string; message?: string; issues: Array<{ output_index: number; severity: 'high' | 'medium'; field: string; message: string; confidence: number }> };
+}
+
 export interface Generation {
   id: number;
   product_id: number;
@@ -87,6 +138,18 @@ export interface KnowledgeDoc {
   created_at: string;
 }
 
+export interface BrandVisualProfile {
+  id?: number;
+  brand_name: string;
+  logo_url: string;
+  primary_color: string;
+  accent_color: string;
+  typography: string;
+  visual_keywords: string[];
+  forbidden_elements: string[];
+  tone_notes: string;
+}
+
 export interface DesignSkill {
   id: number;
   name: string;
@@ -103,11 +166,12 @@ export interface DesignSkill {
   primary_color: string;
   accent_color: string;
   enabled: boolean;
+  version: number;
   created_at: string;
   updated_at: string;
 }
 
-export type DesignSkillCreate = Omit<DesignSkill, 'id' | 'created_at' | 'updated_at'>;
+export type DesignSkillCreate = Omit<DesignSkill, 'id' | 'version' | 'created_at' | 'updated_at'>;
 
 export interface ImageReview {
   id: number;
@@ -139,6 +203,21 @@ export interface LearnedDesignProfile {
   updated_at: string;
 }
 
+export interface SkillCandidate {
+  id: number; profile_id: number; name: string; brand_name: string; category: string;
+  confidence: number; sample_count: number; payload: DesignSkillCreate;
+  status: 'pending' | 'published' | 'rejected'; published_skill_id: number | null;
+  created_at: string; updated_at: string;
+}
+
+export interface DetailPageTemplate {
+  id: number; name: string; description: string; category: string; brand_name: string;
+  platform: string; output_width: number; output_height: number; source_project_id: number | null;
+  modules: Array<Record<string, unknown>>; usage_count: number; enabled: boolean;
+  variables: Array<{key:string;label:string;required:boolean}>; conditions: Record<string,string>;
+  created_at: string; updated_at: string;
+}
+
 export interface CreativeProject {
   id: number;
   product_id: number;
@@ -148,6 +227,8 @@ export interface CreativeProject {
   output_width: number;
   output_height: number;
   status: string;
+  review_status: string;
+  review_round: number;
   viewport: { x?: number; y?: number; zoom?: number };
   created_at: string;
   updated_at: string;
@@ -188,6 +269,12 @@ export interface ProductAsset {
   mime_type: string;
   description: string;
   tags: string[];
+  material_role: string;
+  priority: number;
+  locked: boolean;
+  excluded: boolean;
+  benchmark_role: string;
+  protection: {mask_url?:string;mask_source?:string;protected_regions?:Array<{type:string;text?:string;x:number;y:number;width:number;height:number;confidence?:number}>;position?:{x:number;y:number;scale:number;rotation:number};preserve_shadow?:boolean;preserve_reflection?:boolean};
   created_at: string;
 }
 

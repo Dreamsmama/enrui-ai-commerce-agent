@@ -6,6 +6,7 @@ import base64
 import mimetypes
 import textwrap
 import uuid
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -13,15 +14,19 @@ import httpx
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from app.config import get_settings
+from app.services.storage import get_storage
 
-FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
+FONT_PATH = next((path for path in ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/System/Library/Fonts/STHeiti Medium.ttc") if Path(path).exists()), "/System/Library/Fonts/STHeiti Medium.ttc")
 
 
 def _local_path(url: str) -> Optional[Path]:
-    if not url or url.startswith(("http://", "https://", "data:")):
-        return None
-    path = get_settings().upload_path / url.removeprefix("/uploads/")
-    return path if path.exists() else None
+    return get_storage().local_path(url)
+
+
+def _save_image(image: Image.Image, filename: str, project_id: int, format: str = "PNG") -> str:
+    output = BytesIO()
+    image.save(output, format=format, quality=95)
+    return get_storage().save_bytes(output.getvalue(), filename, f"creative/{project_id}")
 
 
 def _image_input(url: str) -> str:
@@ -34,23 +39,24 @@ def _image_input(url: str) -> str:
 
 def _seedream_size(width: int, height: int) -> str:
     ratio = max(0.34, min(3.0, width / max(height, 1)))
+    max_side = 4096 if max(width, height) >= 3000 else 2048
     if ratio >= 1:
-        output_width = 2048
-        output_height = round(2048 / ratio / 64) * 64
+        output_width = max_side
+        output_height = round(max_side / ratio / 64) * 64
     else:
-        output_height = 2048
-        output_width = round(2048 * ratio / 64) * 64
+        output_height = max_side
+        output_width = round(max_side * ratio / 64) * 64
     return f"{max(1024, output_width)}x{max(1024, output_height)}"
 
 
 class ArkSeedreamImageProvider:
     name = "ark_seedream"
 
-    def __init__(self) -> None:
+    def __init__(self, model_override: str = "") -> None:
         settings = get_settings()
         self.base_url = (settings.image_generation_base_url or settings.llm_api_base).rstrip("/")
         self.api_key = settings.image_generation_api_key or settings.llm_api_key
-        self.model = settings.image_generation_model
+        self.model = model_override or settings.image_generation_model
         self.timeout = settings.image_generation_timeout_seconds
         self.watermark = settings.image_generation_watermark
 
@@ -68,8 +74,6 @@ class ArkSeedreamImageProvider:
         project_id: int,
     ) -> list[str]:
         image_inputs = [_image_input(url) for url in (source_urls or [source_url])[:10] if url]
-        output_dir = get_settings().upload_path / "creative" / str(project_id)
-        output_dir.mkdir(parents=True, exist_ok=True)
         urls: list[str] = []
         with httpx.Client(timeout=self.timeout) as client:
             for index in range(count):
@@ -99,8 +103,7 @@ class ArkSeedreamImageProvider:
                 image_response.raise_for_status()
                 suffix = mimetypes.guess_extension(image_response.headers.get("content-type", "").split(";")[0]) or ".png"
                 filename = f"seedream-{uuid.uuid4().hex}{suffix}"
-                (output_dir / filename).write_bytes(image_response.content)
-                urls.append(f"/uploads/creative/{project_id}/{filename}")
+                urls.append(get_storage().save_bytes(image_response.content, filename, f"creative/{project_id}"))
         return urls
 
 
@@ -124,8 +127,6 @@ class LocalDemoImageProvider:
         sources = [Image.open(path).convert("RGB") for path in source_paths]
         if not sources:
             sources = [Image.new("RGB", (width, height), "#eef3ef")]
-        output_dir = get_settings().upload_path / "creative" / str(project_id)
-        output_dir.mkdir(parents=True, exist_ok=True)
         palettes = [(235, 243, 237), (242, 236, 226), (226, 240, 239), (242, 229, 232)]
         urls = []
         for index in range(count):
@@ -145,13 +146,14 @@ class LocalDemoImageProvider:
             lines = textwrap.wrap(prompt or "基于所选商品与参考素材生成", width=26)[:2]
             draw.multiline_text((45, 78), "\n".join(lines), font=ImageFont.truetype(FONT_PATH, 17), fill=(80, 92, 84), spacing=4)
             filename = f"result-{uuid.uuid4().hex}.png"
-            background.save(output_dir / filename, quality=95)
-            urls.append(f"/uploads/creative/{project_id}/{filename}")
+            urls.append(_save_image(background, filename, project_id))
         return urls
 
 
-def get_image_provider() -> ArkSeedreamImageProvider | LocalDemoImageProvider:
+def get_image_provider(task_type:str="") -> ArkSeedreamImageProvider | LocalDemoImageProvider:
     settings = get_settings()
     if settings.image_generation_model and (settings.image_generation_api_key or settings.llm_api_key):
-        return ArkSeedreamImageProvider()
+        portrait=any(key in task_type.lower() for key in ["portrait","model","human"]);edit=any(key in task_type.lower() for key in ["edit","regional"]);upscale=any(key in task_type.lower() for key in ["upscale","final","4k"])
+        model=settings.image_portrait_model if portrait else settings.image_edit_model if edit else settings.image_upscale_model if upscale else settings.image_product_model
+        return ArkSeedreamImageProvider(model or settings.image_generation_model)
     return LocalDemoImageProvider()

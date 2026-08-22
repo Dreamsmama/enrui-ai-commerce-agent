@@ -42,6 +42,24 @@ class Product(Base):
     )
 
 
+class BrandVisualProfile(Base):
+    __tablename__ = "brand_visual_profiles"
+    __table_args__ = (UniqueConstraint("tenant_id", "brand_name", name="uq_tenant_brand_visual"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    brand_name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    logo_url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    primary_color: Mapped[str] = mapped_column(String(16), nullable=False, default="#1C6F56")
+    accent_color: Mapped[str] = mapped_column(String(16), nullable=False, default="#E2EFE8")
+    typography: Mapped[str] = mapped_column(String(256), nullable=False, default="现代中文黑体，标题克制醒目")
+    visual_keywords: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    forbidden_elements: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    tone_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Generation(Base):
     __tablename__ = "generations"
 
@@ -129,6 +147,7 @@ class DesignSkill(Base):
     primary_color: Mapped[str] = mapped_column(String(16), nullable=False, default="#1f7258")
     accent_color: Mapped[str] = mapped_column(String(16), nullable=False, default="#dceee5")
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -171,6 +190,50 @@ class LearnedDesignProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SkillCandidate(Base):
+    __tablename__ = "skill_candidates"
+    __table_args__ = (UniqueConstraint("tenant_id", "profile_id", name="uq_candidate_profile"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("learned_design_profiles.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    brand_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    category: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    published_skill_id: Mapped[Optional[int]] = mapped_column(ForeignKey("design_skills.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DetailPageTemplate(Base):
+    __tablename__ = "detail_page_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    category: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    brand_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    platform: Mapped[str] = mapped_column(String(64), nullable=False, default="天猫")
+    output_width: Mapped[int] = mapped_column(Integer, nullable=False, default=750)
+    output_height: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+    source_project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("creative_projects.id"), nullable=True)
+    modules: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    variables: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    conditions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    approved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_revision_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class CreativeProject(Base):
     __tablename__ = "creative_projects"
 
@@ -183,7 +246,44 @@ class CreativeProject(Base):
     output_width: Mapped[int] = mapped_column(Integer, nullable=False, default=750)
     output_height: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    review_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     viewport: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CreativePlan(Base):
+    __tablename__ = "creative_plans"
+    __table_args__ = (UniqueConstraint("project_id", name="uq_creative_plan_project"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    product_understanding: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    strategy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StoryboardModule(Base):
+    __tablename__ = "storyboard_modules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    module_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_guidance: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    visual_direction: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    production_method: Mapped[str] = mapped_column(String(32), nullable=False, default="ai_image")
+    required: Mapped[bool] = mapped_column(nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned")
+    preview_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    final_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -220,6 +320,25 @@ class CreativeGeneration(Base):
     result_node_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     context_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CreativeBatchJob(Base):
+    __tablename__ = "creative_batch_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    module_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    module_results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_module_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stop_requested: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -274,6 +393,12 @@ class ProductAsset(Base):
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tags: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
+    material_role: Mapped[str] = mapped_column(String(64), nullable=False, default="auto")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked: Mapped[bool] = mapped_column(nullable=False, default=False)
+    excluded: Mapped[bool] = mapped_column(nullable=False, default=False)
+    benchmark_role: Mapped[str] = mapped_column(String(64), nullable=False, default="none")
+    protection: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     product: Mapped[Optional["Product"]] = relationship("Product", back_populates="assets")
@@ -289,6 +414,228 @@ class AuditLog(Base):
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class DesignSkillVersion(Base):
+    __tablename__ = "design_skill_versions"
+    __table_args__ = (UniqueConstraint("skill_id", "version", name="uq_skill_version"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    skill_id: Mapped[int] = mapped_column(ForeignKey("design_skills.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    change_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    performance_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProviderBillingRecord(Base):
+    __tablename__ = "provider_billing_records"
+    __table_args__ = (UniqueConstraint("tenant_id", "provider", "external_id", name="uq_provider_bill"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="volcengine_ark")
+    external_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    billing_date: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    amount_cny: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    usage: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    raw: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProjectReview(Base):
+    __tablename__ = "project_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    from_status: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(64), nullable=False, default="member")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductFact(Base):
+    __tablename__ = "product_facts"
+    __table_args__ = (UniqueConstraint("tenant_id", "product_id", "fact_key", name="uq_product_fact_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    fact_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    label: Mapped[str] = mapped_column(String(256), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, default="manual")
+    source_ref: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    conflict_values: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    confirmed_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectSnapshot(Base):
+    __tablename__ = "project_snapshots"
+    __table_args__ = (UniqueConstraint("project_id", "version", name="uq_project_snapshot_version"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False, default="submit")
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    diff_from_previous: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionQueueTask(Base):
+    __tablename__ = "production_queue_tasks"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(64), nullable=False, default="member")
+    actor_email: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    tenant_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    cancel_requested: Mapped[bool] = mapped_column(nullable=False, default=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SkuBatch(Base):
+    __tablename__ = "sku_batches"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("detail_page_templates.id"), nullable=True)
+    platform: Mapped[str] = mapped_column(String(64), nullable=False, default="天猫")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SkuBatchItem(Base):
+    __tablename__ = "sku_batch_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("sku_batches.id"), nullable=False, index=True)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    sku: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("products.id"), nullable=True)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("creative_projects.id"), nullable=True)
+    queue_task_id: Mapped[Optional[str]] = mapped_column(ForeignKey("production_queue_tasks.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="created")
+    error_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    raw: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ApprovalIssue(Base):
+    __tablename__ = "approval_issues"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    module_id: Mapped[int] = mapped_column(ForeignKey("storyboard_modules.id"), nullable=False, index=True)
+    source_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    resolved_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    issue_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False, default="medium")
+    action: Mapped[str] = mapped_column(String(32), nullable=False, default="regenerate")
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    region: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    assignee_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    blocks_finalize: Mapped[bool] = mapped_column(nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    resolved_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class QualityRegressionRun(Base):
+    __tablename__ = "quality_regression_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    suite_version: Mapped[str] = mapped_column(String(32), nullable=False, default="commerce-v1")
+    model: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    results: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class QualityRuleSet(Base):
+    __tablename__ = "quality_rule_sets"
+    __table_args__ = (UniqueConstraint("tenant_id", "category", name="uq_quality_rules_category"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(128), nullable=False, default="general")
+    thresholds: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    rules: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class QualityRuleVersion(Base):
+    __tablename__ = "quality_rule_versions"
+    __table_args__ = (UniqueConstraint("rule_set_id", "version", name="uq_quality_rule_version"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    rule_set_id: Mapped[int] = mapped_column(ForeignKey("quality_rule_sets.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class QualityFeedback(Base):
+    __tablename__ = "quality_feedback"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("creative_projects.id"), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    feedback_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    field: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RegressionSample(Base):
+    __tablename__ = "regression_samples"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(128), nullable=False, default="general")
+    case_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    input_urls: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    accepted_url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    failure_urls: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Tenant(Base):

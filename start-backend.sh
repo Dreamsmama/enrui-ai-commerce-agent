@@ -13,4 +13,5 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created backend/.env — please set LLM_API_KEY"
 fi
+.venv/bin/python scripts/init_deployment.py
 exec .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

@@ -7,6 +7,10 @@ import {
   Sparkles,
   Palette,
   PanelsTopLeft,
+  Activity,
+  LayoutTemplate,
+  Factory,
+  ShieldCheck,
 } from 'lucide-react';
 
 const nav = [
@@ -14,8 +18,13 @@ const nav = [
   { to: '/products/new', label: '创建商品', icon: PackagePlus },
   { to: '/history', label: '历史管理', icon: History },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
+  { to: '/brand-visuals', label: '品牌视觉', icon: Palette },
   { to: '/design-skills', label: '设计 Skill', icon: Palette },
+  { to: '/detail-templates', label: '详情页模板', icon: LayoutTemplate },
+  { to: '/production', label: '批量生产看板', icon: Factory },
   { to: '/creative-projects', label: 'AI 创作工作台', icon: PanelsTopLeft },
+  { to: '/task-center', label: '任务与费用', icon: Activity },
+  { to: '/quality', label: '质量与审核', icon: ShieldCheck },
 ];
 
 export default function Layout() {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import mimetypes
+import uuid
+from io import BytesIO
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -11,8 +13,11 @@ from app.config import get_settings
 from app.auth import AuthContext, current_auth
 from app.database import get_db
 from app.models import Product, ProductAsset
-from app.schemas import ProductAssetOut, ProductCreate, ProductOut, ProductUpdate
+from app.schemas import ProductAssetOut, ProductAssetUpdate, ProductCreate, ProductOut, ProductUpdate
 from app.services.storage import get_storage
+from app.services.image_postprocess import local_path, product_foreground_mask
+from app.services.llm import get_llm
+from PIL import Image
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -141,6 +146,48 @@ async def delete_product_asset(
     db.commit()
     await get_storage().delete(file_url)
     return {"ok": True, "id": asset_id}
+
+
+@router.put("/{product_id}/assets/{asset_id}", response_model=ProductAssetOut)
+def update_product_asset(product_id: int, asset_id: int, payload: ProductAssetUpdate, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+    asset = db.query(ProductAsset).filter(ProductAsset.id == asset_id, ProductAsset.product_id == product_id, ProductAsset.tenant_id == auth.tenant_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    for key, value in payload.model_dump().items():
+        setattr(asset, key, value)
+    db.commit(); db.refresh(asset)
+    return asset
+
+
+@router.post("/{product_id}/assets/{asset_id}/auto-mask", response_model=ProductAssetOut)
+def create_asset_mask(product_id:int,asset_id:int,db:Session=Depends(get_db),auth:AuthContext=Depends(current_auth)):
+    asset=db.query(ProductAsset).filter_by(id=asset_id,product_id=product_id,tenant_id=auth.tenant_id).first()
+    if not asset:raise HTTPException(404,"商品素材不存在")
+    path=local_path(asset.file_url)
+    if not path:raise HTTPException(409,"自动蒙版需要已保存的本地图片")
+    image=Image.open(path).convert("RGB");mask=product_foreground_mask(image);name=f"mask-{asset.id}-{uuid.uuid4().hex}.png";output=BytesIO();mask.save(output,"PNG");url=get_storage().save_bytes(output.getvalue(),name,"masks")
+    asset.protection={**(asset.protection or {}),"mask_url":url,"mask_source":"auto","position":{"x":.5,"y":.5,"scale":.72,"rotation":0},"preserve_shadow":False,"preserve_reflection":False};db.commit();db.refresh(asset);return asset
+
+
+@router.post("/{product_id}/assets/{asset_id}/mask", response_model=ProductAssetOut)
+async def upload_asset_mask(product_id:int,asset_id:int,file:UploadFile=File(...),db:Session=Depends(get_db),auth:AuthContext=Depends(current_auth)):
+    asset=db.query(ProductAsset).filter_by(id=asset_id,product_id=product_id,tenant_id=auth.tenant_id).first()
+    if not asset:raise HTTPException(404,"商品素材不存在")
+    raw=await file.read()
+    try:mask=Image.open(BytesIO(raw)).convert("L")
+    except Exception as exc:raise HTTPException(415,"蒙版必须是有效图片") from exc
+    name=f"mask-{asset.id}-{uuid.uuid4().hex}.png";output=BytesIO();mask.save(output,"PNG");url=get_storage().save_bytes(output.getvalue(),name,"masks")
+    asset.protection={**(asset.protection or {}),"mask_url":url,"mask_source":"manual"};db.commit();db.refresh(asset);return asset
+
+
+@router.post("/{product_id}/assets/{asset_id}/analyze-protection", response_model=ProductAssetOut)
+async def analyze_asset_protection(product_id:int,asset_id:int,db:Session=Depends(get_db),auth:AuthContext=Depends(current_auth)):
+    asset=db.query(ProductAsset).filter_by(id=asset_id,product_id=product_id,tenant_id=auth.tenant_id).first();settings=get_settings()
+    if not asset:raise HTTPException(404,"商品素材不存在")
+    if settings.llm_mock_mode or not settings.llm_api_key:raise HTTPException(503,"未配置真实视觉模型，无法提取Logo和包装文字保护区")
+    prompt='找出图中所有Logo和包装文字区域。输出JSON：{"regions":[{"type":"logo|text","text":"可读文字或空字符串","x":0-1,"y":0-1,"width":0-1,"height":0-1,"confidence":0-1}]}。坐标为归一化左上角和宽高。'
+    result=await get_llm().chat_vision(prompt,[asset.file_url],system_prompt='只输出JSON，不要猜测看不清的文字。',temperature=.1,max_tokens=1600,as_json=True);regions=result.get("regions") if isinstance(result,dict) else []
+    asset.protection={**(asset.protection or {}),"protected_regions":regions if isinstance(regions,list) else [],"ocr_model":settings.llm_vision_model};db.commit();db.refresh(asset);return asset
 
 
 @router.put("/{product_id}", response_model=ProductOut)

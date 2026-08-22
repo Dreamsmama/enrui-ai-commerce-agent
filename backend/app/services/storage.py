@@ -1,52 +1,140 @@
-"""Storage facade with a local provider and an OSS-ready boundary."""
-
+"""Persistent object storage with an ephemeral local processing cache."""
 from __future__ import annotations
 
+import asyncio
+import base64
+import hashlib
+import mimetypes
+import tempfile
 import uuid
 from pathlib import Path
-from typing import Protocol
 
 import aiofiles
 
 from app.config import get_settings
 
+OBJECT_ROUTE = "/api/storage/objects/"
 
-class StorageProvider(Protocol):
-    async def save(self, data: bytes, filename: str, subdir: str) -> str: ...
-    async def delete(self, url: str) -> None: ...
+
+def _token(key: str) -> str:
+    return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
+
+
+def object_key(url: str) -> str | None:
+    if not url.startswith(OBJECT_ROUTE):
+        return None
+    value = url.removeprefix(OBJECT_ROUTE)
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
 
 
 class LocalStorageProvider:
     def __init__(self) -> None:
         self.root = get_settings().upload_path
 
-    async def save(self, data: bytes, filename: str, subdir: str) -> str:
+    def save_bytes(self, data: bytes, filename: str, subdir: str) -> str:
         suffix = Path(filename).suffix
-        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        name = f"{uuid.uuid4().hex}{suffix}"
         directory = self.root / subdir
         directory.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(directory / stored_name, "wb") as output:
-            await output.write(data)
-        return f"/uploads/{subdir}/{stored_name}"
+        (directory / name).write_bytes(data)
+        return f"/uploads/{subdir}/{name}"
 
-    async def delete(self, url: str) -> None:
-        relative = url.removeprefix("/uploads/")
-        path = (self.root / relative).resolve()
-        if self.root.resolve() not in path.parents:
-            raise ValueError("非法存储路径")
-        if path.exists():
-            path.unlink()
+    def local_path(self, url: str) -> Path | None:
+        if not url or url.startswith(("http://", "https://", "data:")):
+            return None
+        path = (self.root / url.removeprefix("/uploads/")).resolve()
+        return path if path.exists() and self.root.resolve() in path.parents else None
+
+    def delete_sync(self, url: str) -> None:
+        path = self.local_path(url)
+        if path:
+            path.unlink(missing_ok=True)
+
+    def signed_url(self, url: str) -> str:
+        return url
+
+
+class AliyunOSSProvider:
+    def __init__(self) -> None:
+        import oss2
+
+        settings = get_settings()
+        required = {
+            "ALIYUN_OSS_ENDPOINT": settings.aliyun_oss_endpoint,
+            "ALIYUN_OSS_ACCESS_KEY_ID": settings.aliyun_oss_access_key_id,
+            "ALIYUN_OSS_ACCESS_KEY_SECRET": settings.aliyun_oss_access_key_secret,
+            "ALIYUN_OSS_BUCKET_NAME": settings.aliyun_oss_bucket_name,
+        }
+        missing = [key for key, value in required.items() if not value]
+        if missing:
+            raise RuntimeError("OSS 配置缺失：" + ", ".join(missing))
+        endpoint = settings.aliyun_oss_endpoint.removeprefix("https://").removeprefix("http://")
+        self.bucket = oss2.Bucket(
+            oss2.Auth(settings.aliyun_oss_access_key_id, settings.aliyun_oss_access_key_secret),
+            f"https://{endpoint}", settings.aliyun_oss_bucket_name,
+        )
+        self.prefix = settings.aliyun_oss_prefix.strip("/")
+        self.cache = Path(tempfile.gettempdir()) / "enrui-ai-commerce-agent-cache"
+        self.cache.mkdir(parents=True, exist_ok=True)
+
+    def _new_key(self, filename: str, subdir: str) -> str:
+        suffix = Path(filename).suffix
+        relative = f"{subdir.strip('/')}/{uuid.uuid4().hex}{suffix}"
+        return f"{self.prefix}/{relative}" if self.prefix else relative
+
+    def save_bytes(self, data: bytes, filename: str, subdir: str) -> str:
+        key = self._new_key(filename, subdir)
+        headers = {}
+        content_type = mimetypes.guess_type(filename)[0]
+        if content_type:
+            headers["Content-Type"] = content_type
+        self.bucket.put_object(key, data, headers=headers)
+        return OBJECT_ROUTE + _token(key)
+
+    def local_path(self, url: str) -> Path | None:
+        key = object_key(url)
+        if not key:
+            return None
+        suffix = Path(key).suffix
+        path = self.cache / f"{hashlib.sha256(key.encode()).hexdigest()}{suffix}"
+        if not path.exists():
+            self.bucket.get_object_to_file(key, str(path))
+        return path
+
+    def delete_sync(self, url: str) -> None:
+        key = object_key(url)
+        if key:
+            self.bucket.delete_object(key)
+            suffix = Path(key).suffix
+            path = self.cache / f"{hashlib.sha256(key.encode()).hexdigest()}{suffix}"
+            path.unlink(missing_ok=True)
+
+    def signed_url(self, url: str) -> str:
+        key = object_key(url)
+        if not key:
+            raise ValueError("不是 OSS 对象地址")
+        return self.bucket.sign_url("GET", key, 900, slash_safe=True)
 
 
 class StorageService:
-    def __init__(self, provider: StorageProvider | None = None) -> None:
-        self.provider = provider or LocalStorageProvider()
+    def __init__(self) -> None:
+        mode = get_settings().storage_provider
+        self.provider = AliyunOSSProvider() if mode in {"aliyun_oss", "aliyun_oss_mirror"} else LocalStorageProvider()
 
     async def upload(self, data: bytes, filename: str, subdir: str) -> str:
-        return await self.provider.save(data, filename, subdir)
+        return await asyncio.to_thread(self.provider.save_bytes, data, filename, subdir)
+
+    def save_bytes(self, data: bytes, filename: str, subdir: str) -> str:
+        return self.provider.save_bytes(data, filename, subdir)
+
+    def local_path(self, url: str) -> Path | None:
+        return self.provider.local_path(url)
 
     async def delete(self, url: str) -> None:
-        await self.provider.delete(url)
+        await asyncio.to_thread(self.provider.delete_sync, url)
+
+    def signed_url(self, url: str) -> str:
+        return self.provider.signed_url(url)
 
 
 _storage: StorageService | None = None
