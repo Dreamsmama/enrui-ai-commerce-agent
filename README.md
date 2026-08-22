@@ -1,5 +1,11 @@
 # Enrui AI Commerce Agent
 
+## 项目文档
+
+- [技术架构说明](docs/01-TECHNICAL-ARCHITECTURE.md)：技术栈、系统分层、数据域、部署与安全边界。
+- [功能说明](docs/02-FEATURES.md)：当前功能范围和推荐业务流程。
+- [功能实现与开发指南](docs/03-IMPLEMENTATION-GUIDE.md)：关键入口、实现链路、扩展约定与技术债。
+
 ## 阿里云一键部署
 
 服务器要求：Ubuntu 22.04+、root 权限，安全组开放 TCP 80。首次部署在服务器执行：
