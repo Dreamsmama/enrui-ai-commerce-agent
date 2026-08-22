@@ -1,5 +1,24 @@
 # Enrui AI Commerce Agent
 
+## 阿里云一键部署
+
+服务器要求：Ubuntu 22.04+、root 权限，安全组开放 TCP 80。首次部署在服务器执行：
+
+```bash
+git clone https://github.com/Dreamsmama/enrui-ai-commerce-agent.git /opt/enrui-ai-commerce-agent/repository
+bash /opt/enrui-ai-commerce-agent/repository/deploy.sh
+```
+
+首次运行会创建 `/opt/enrui-ai-commerce-agent/shared/.env` 并停止。填写其中全部 `FILL_` 配置后再次执行同一条 `deploy.sh` 命令即可完成建表、构建、启动和健康检查。
+
+以后代码 push 到 `main` 后，在服务器只需执行：
+
+```bash
+bash /opt/enrui-ai-commerce-agent/repository/deploy.sh
+```
+
+生产配置独立保存在服务器 `shared/.env`，不会被 `git pull` 覆盖，也不会提交到仓库。
+
 ## 商品知识库与详情页 Demo 闭环
 
 当前版本已支持：
