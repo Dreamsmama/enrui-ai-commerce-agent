@@ -1,15 +1,43 @@
 import unittest
+import time
 from types import SimpleNamespace
 
+from app.api.creative import _generation_duration_ms
 from app.api.production import _diff
 from app.api.templates import _parameterize, _resolve
 from app.services.quality_pipeline import apply_generation_controls, validate_and_rewrite_prompt
-from app.services.image_postprocess import product_foreground_mask
+from app.services.image_postprocess import hamming_distance, product_foreground_mask
+from app.services.generation_diagnostics import diagnose_generation_error
 from PIL import Image, ImageDraw
 from app.api.quality import _rules
 
 
 class ProductionUnitTests(unittest.TestCase):
+    def test_hamming_distance_supports_python_39(self):
+        self.assertEqual(hamming_distance(0b101101), 4)
+        self.assertEqual(hamming_distance(0), 0)
+
+    def test_generation_errors_have_actionable_degradation_diagnostics(self):
+        cases = [
+            (TimeoutError("provider timed out"), "timeout", True),
+            (RuntimeError("HTTP 429 rate limit"), "rate_limited", True),
+            (RuntimeError("insufficient quota"), "insufficient_balance", False),
+            (RuntimeError("content policy rejected"), "content_rejected", False),
+            (RuntimeError("HTTP 422 invalid parameter"), "invalid_request", False),
+            (RuntimeError("upstream unavailable"), "provider_error", True),
+        ]
+        for error, expected_code, retryable in cases:
+            with self.subTest(expected_code):
+                diagnostic = diagnose_generation_error(error)
+                self.assertEqual(diagnostic["code"], expected_code)
+                self.assertEqual(diagnostic["retryable"], retryable)
+                self.assertTrue(diagnostic["title"])
+                self.assertTrue(diagnostic["suggestion"])
+
+    def test_generation_duration_is_available_on_success_and_error_paths(self):
+        started_at = time.perf_counter() - 0.01
+        self.assertGreaterEqual(_generation_duration_ms(started_at), 0)
+
     def test_template_variables_round_trip(self):
         product = SimpleNamespace(name="测试精华", brand_name="品牌A", category="精华", description="补水", target_users="干皮", ingredients="透明质酸", usage_method="早晚使用", specifications="30ml")
         source = "品牌A测试精华，30ml，核心卖点补水"

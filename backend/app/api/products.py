@@ -22,6 +22,16 @@ from PIL import Image
 router = APIRouter(prefix="/products", tags=["products"])
 
 
+def _sync_primary_image(product: Product, asset: ProductAsset) -> None:
+    """Keep the legacy Product.image_urls preview in sync with asset metadata."""
+    urls = [url for url in (product.image_urls or []) if url != asset.file_url]
+    is_image = asset.asset_type == "product_image" and asset.mime_type.startswith("image/")
+    is_primary = asset.material_role == "product" or asset.locked or asset.benchmark_role == "product_front"
+    if is_image and not asset.excluded and is_primary:
+        urls.insert(0, asset.file_url)
+    product.image_urls = urls
+
+
 def _to_out(product: Product) -> ProductOut:
     return ProductOut(
         id=product.id,
@@ -126,6 +136,12 @@ async def upload_product_assets(
         )
         db.add(asset)
         created.append(asset)
+    # The creative-project picker still reads Product.image_urls. Seed it with
+    # the first uploaded product image; later role/lock updates can replace it.
+    if asset_type == "product_image" and not (product.image_urls or []):
+        first_image = next((asset for asset in created if asset.mime_type.startswith("image/")), None)
+        if first_image:
+            product.image_urls = [first_image.file_url]
     db.commit()
     for asset in created:
         db.refresh(asset)
@@ -142,6 +158,10 @@ async def delete_product_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="素材不存在")
     file_url = asset.file_url
+    product = asset.product
+    if product:
+        product.image_urls = [url for url in (product.image_urls or []) if url != file_url]
+        product.detail_image_urls = [url for url in (product.detail_image_urls or []) if url != file_url]
     db.delete(asset)
     db.commit()
     await get_storage().delete(file_url)
@@ -155,6 +175,9 @@ def update_product_asset(product_id: int, asset_id: int, payload: ProductAssetUp
         raise HTTPException(status_code=404, detail="素材不存在")
     for key, value in payload.model_dump().items():
         setattr(asset, key, value)
+    product = db.query(Product).filter(Product.id == product_id, Product.tenant_id == auth.tenant_id).first()
+    if product:
+        _sync_primary_image(product, asset)
     db.commit(); db.refresh(asset)
     return asset
 

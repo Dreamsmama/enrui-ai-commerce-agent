@@ -64,7 +64,7 @@ export interface StoryboardBatchJob {
   project_id: number;
   status: string;
   module_ids: number[];
-  module_results: Array<{ module_id: number; status: string; error?: string }>;
+  module_results: Array<{ module_id: number; status: string; error?: string | { code?: string; title: string; message?: string; suggestion?: string; retryable?: boolean } }>;
   total: number;
   completed: number;
   failed: number;
