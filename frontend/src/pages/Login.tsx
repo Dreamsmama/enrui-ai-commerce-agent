@@ -19,7 +19,11 @@ export default function Login() {
 
   return <div className="min-h-screen grid place-items-center bg-[var(--bg)] p-6">
     <form className="panel p-8 w-full max-w-md space-y-4" onSubmit={submit}>
-      <h1 className="font-display text-2xl">{registering ? '创建企业账号' : '登录 Enrui AI'}</h1>
+      <div className="pb-2">
+        <div className="font-display text-4xl leading-none">Dirovo</div>
+        <div className="mt-1 font-display text-lg leading-none tracking-[0.08em]">蒂洛薇</div>
+      </div>
+      <h1 className="text-base font-medium">{registering ? '创建企业账号' : '登录品牌创作平台'}</h1>
       {registering && <>
         <label className="field"><span>企业名称</span><input required value={form.tenant_name} onChange={(e)=>setForm({...form,tenant_name:e.target.value})}/></label>
         <label className="field"><span>企业代码</span><input required pattern="[a-z0-9-]+" value={form.tenant_code} onChange={(e)=>setForm({...form,tenant_code:e.target.value})}/></label>

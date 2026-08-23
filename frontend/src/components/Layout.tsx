@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   PackagePlus,
   BookOpen,
-  Sparkles,
   Palette,
   PanelsTopLeft,
   Activity,
@@ -49,15 +48,8 @@ export default function Layout() {
     <div className="min-h-screen flex bg-[var(--bg)] text-[var(--text)]">
       <aside className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--panel)] flex flex-col">
         <div className="px-5 py-6 border-b border-[var(--border)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-[var(--accent)] text-white flex items-center justify-center">
-              <Sparkles size={18} />
-            </div>
-            <div>
-              <div className="font-display text-lg leading-tight tracking-tight">Enrui AI</div>
-              <div className="text-xs text-[var(--muted)]">Commerce Agent</div>
-            </div>
-          </div>
+          <div className="font-display text-3xl leading-none">Dirovo</div>
+          <div className="mt-1 font-display text-base leading-none tracking-[0.08em]">蒂洛薇</div>
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {nav.map((item) => (
