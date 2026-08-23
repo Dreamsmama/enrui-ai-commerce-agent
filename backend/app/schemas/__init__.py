@@ -53,7 +53,6 @@ class ProductOut(BaseModel):
     detail_image_urls: list[str] = []
     created_at: datetime
     updated_at: datetime
-    generation_count: int = 0
     learned_profile_enabled: bool = True
 
     model_config = {"from_attributes": True}
@@ -74,64 +73,6 @@ class BrandVisualProfileOut(BrandVisualProfileCreate):
     id: int
     created_at: datetime
     updated_at: datetime
-    model_config = {"from_attributes": True}
-
-
-# ── Generation ───────────────────────────────────────────
-
-class GenerationOut(BaseModel):
-    id: int
-    product_id: int
-    status: str
-    agent_results: Optional[dict[str, Any]] = None
-    detail_page_markdown: Optional[str] = None
-    detail_page_sections: Optional[dict[str, Any]] = None
-    marketing_copy: Optional[str] = None
-    main_image_copy: Optional[str] = None
-    error_message: Optional[str] = None
-    attempt_count: int = 0
-    max_attempts: int = 3
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class GenerationListItem(BaseModel):
-    id: int
-    product_id: int
-    product_name: str = ""
-    status: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-# ── Edit ─────────────────────────────────────────────────
-
-class EditRequest(BaseModel):
-    action: str  # regenerate_section | optimize_tone | change_audience
-    section: Optional[str] = None
-    instruction: Optional[str] = None
-    target_audience: Optional[str] = None
-
-
-class GenerationModulesUpdate(BaseModel):
-    sections: dict[str, str]
-    module_order: list[str]
-
-
-class EditHistoryOut(BaseModel):
-    id: int
-    generation_id: int
-    action: str
-    section: Optional[str] = None
-    instruction: Optional[str] = None
-    before_content: Optional[str] = None
-    after_content: Optional[str] = None
-    created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -179,31 +120,6 @@ class DesignSkillCreate(BaseModel):
 class DesignSkillOut(DesignSkillCreate):
     id: int
     version: int = 1
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class ImageReviewCreate(BaseModel):
-    status: str
-    reasons: list[str] = Field(default_factory=list)
-    note: str = ""
-
-
-class ImageReviewOut(BaseModel):
-    id: int
-    generation_id: int
-    product_id: int
-    module_key: str
-    module_title: str
-    image_url: str
-    status: str
-    reasons: list[str] = Field(default_factory=list)
-    note: str
-    weight: float
-    visual_analysis: Optional[dict[str, Any]] = None
-    learning_status: str
     created_at: datetime
     updated_at: datetime
 
@@ -374,6 +290,7 @@ class CreativeGenerateRequest(BaseModel):
     product_lock: str = Field(default="strict", pattern="^(strict|balanced|creative)$")
     variation_axis: str = Field(default="composition", pattern="^(composition|scene|color|model|lighting)$")
     generation_stage: str = Field(default="preview", pattern="^(preview|final)$")
+    trigger_source: str = Field(default="manual", pattern="^(manual|batch|retry|quality_retry|production_queue)$")
 
 
 class StoryboardQuickEditRequest(BaseModel):
@@ -470,15 +387,6 @@ class ProductAssetUpdate(BaseModel):
     excluded: bool = False
     benchmark_role: str = "none"
     protection: dict[str, Any] = Field(default_factory=dict)
-
-
-# ── Dashboard ────────────────────────────────────────────
-
-class DashboardStats(BaseModel):
-    product_count: int
-    generation_count: int
-    knowledge_doc_count: int
-    recent_tasks: list[GenerationListItem]
 
 
 class RegisterRequest(BaseModel):

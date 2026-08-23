@@ -27,33 +27,6 @@ def object_key(url: str) -> str | None:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
 
 
-class LocalStorageProvider:
-    def __init__(self) -> None:
-        self.root = get_settings().upload_path
-
-    def save_bytes(self, data: bytes, filename: str, subdir: str) -> str:
-        suffix = Path(filename).suffix
-        name = f"{uuid.uuid4().hex}{suffix}"
-        directory = self.root / subdir
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / name).write_bytes(data)
-        return f"/uploads/{subdir}/{name}"
-
-    def local_path(self, url: str) -> Path | None:
-        if not url or url.startswith(("http://", "https://", "data:")):
-            return None
-        path = (self.root / url.removeprefix("/uploads/")).resolve()
-        return path if path.exists() and self.root.resolve() in path.parents else None
-
-    def delete_sync(self, url: str) -> None:
-        path = self.local_path(url)
-        if path:
-            path.unlink(missing_ok=True)
-
-    def signed_url(self, url: str) -> str:
-        return url
-
-
 class AliyunOSSProvider:
     def __init__(self) -> None:
         import oss2
@@ -119,7 +92,9 @@ class AliyunOSSProvider:
 class StorageService:
     def __init__(self) -> None:
         mode = get_settings().storage_provider
-        self.provider = AliyunOSSProvider() if mode in {"aliyun_oss", "aliyun_oss_mirror"} else LocalStorageProvider()
+        if mode not in {"aliyun_oss", "aliyun_oss_mirror"}:
+            raise RuntimeError("仅支持阿里云 OSS 存储，请配置 STORAGE_PROVIDER=aliyun_oss")
+        self.provider = AliyunOSSProvider()
 
     async def upload(self, data: bytes, filename: str, subdir: str) -> str:
         return await asyncio.to_thread(self.provider.save_bytes, data, filename, subdir)

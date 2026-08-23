@@ -184,16 +184,9 @@ class LLMClient:
         from app.services.storage import get_storage
         stored = get_storage().local_path(src)
         path = stored or Path(src)
-        if not path.is_absolute():
-            path = get_settings().upload_path / src.lstrip("/")
         if not path.exists():
-            # Try relative to uploads/images
-            alt = get_settings().upload_path / "images" / Path(src).name
-            if alt.exists():
-                path = alt
-            else:
-                logger.warning("Image not found: %s", src)
-                return None
+            logger.warning("Image not found: %s", src)
+            return None
 
         mime, _ = mimetypes.guess_type(str(path))
         mime = mime or "image/jpeg"

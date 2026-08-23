@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CircleStop, Download, Eye, Image as ImageIcon, Loader2, Palette, Play, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronUp, CircleStop, Download, Eye, History, Image as ImageIcon, Loader2, Palette, Play, Plus, RefreshCw, SlidersHorizontal, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import { creativeApi, mediaUrl, operationsApi, productionApi } from '../api/client';
 import ComplianceModal from '../components/ComplianceModal';
 import StyleBatchModal from '../components/StyleBatchModal';
 import type { StyleVersion } from '../components/StyleBatchModal';
 import DirectEditModal, { type DirectEditState } from '../components/DirectEditModal';
-import type { CanvasNodeRecord, ComplianceReport, CreativePlan, CreativeProject, StoryboardBatchJob, StoryboardModule } from '../types';
+import type { CanvasNodeRecord, ComplianceReport, CreativeGenerationRecord, CreativePlan, CreativeProject, StoryboardBatchJob, StoryboardModule } from '../types';
 
 const METHOD_LABELS: Record<string, string> = {
   ai_image: 'AI视觉生成',
   template: '模板排版',
   manual: '设计师精修',
 };
+
+const GENERATION_STATUS: Record<string, string> = { completed: '成功', failed: '失败', running: '生成中', pending: '排队中', interrupted: '已中断' };
+const TRIGGER_SOURCE: Record<string, string> = { manual: '手动单屏生成', batch: '整套批量生成', retry: '失败任务重试', quality_retry: '质检建议重试', production_queue: '生产队列', unknown: '历史任务' };
 
 export default function StoryboardPage() {
   const projectId = Number(useParams().id);
@@ -41,35 +44,40 @@ export default function StoryboardPage() {
   const [snapshots,setSnapshots]=useState<Array<{id:number;version:number;trigger:string;diff:{change_count:number;changes:Array<Record<string,unknown>>};created_at:string}>>([]);
   const [qualitySummary,setQualitySummary]=useState<{status:string;score:number;scored_count:number;module_count:number;issues:Array<{module_id:number;severity:string;message:string;suggestion:string}>}|null>(null);
   const [approvalIssues,setApprovalIssues]=useState<Array<{id:number;module_id:number;source_node_id:string|null;resolved_node_id:string|null;issue_type:string;severity:string;action:string;note:string;region?:{x:number;y:number;width:number;height:number};status:string;created_at:string}>>([]);
-  const [productLock,setProductLock]=useState<'strict'|'balanced'|'creative'>('strict');
   const [variationAxis,setVariationAxis]=useState<'composition'|'scene'|'color'|'model'|'lighting'>('composition');
   const [markingModule,setMarkingModule]=useState<number|null>(null);
   const [dragStart,setDragStart]=useState<{x:number;y:number}|null>(null);
   const [markedRegion,setMarkedRegion]=useState<{x:number;y:number;width:number;height:number}|null>(null);
   const [regression,setRegression]=useState<{status:string;case_count:number;passed:number;failed:number}|null>(null);
+  const [generationRecords,setGenerationRecords]=useState<CreativeGenerationRecord[]>([]);
+  const [showGenerationRecords,setShowGenerationRecords]=useState(false);
+  const [retryingGeneration,setRetryingGeneration]=useState<number|null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const [projectRow, nodeRows] = await Promise.all([creativeApi.get(projectId), creativeApi.nodes(projectId)]);
-      const [latestBatchResult, reviewResult, snapshotsResult, qualityResult, issuesResult] = await Promise.allSettled([
+      const [latestBatchResult, reviewResult, snapshotsResult, qualityResult, issuesResult, generationResult] = await Promise.allSettled([
         creativeApi.latestBatch(projectId),
         operationsApi.projectReviews(projectId),
         productionApi.snapshots(projectId),
         creativeApi.qualitySummary(projectId),
         creativeApi.approvalIssues(projectId),
+        creativeApi.generations(projectId),
       ]);
       const latestBatch = latestBatchResult.status === 'fulfilled' ? latestBatchResult.value : null;
       const reviewRow = reviewResult.status === 'fulfilled' ? reviewResult.value : null;
       const snapshotRows = snapshotsResult.status === 'fulfilled' ? snapshotsResult.value : [];
       const qualityRow = qualityResult.status === 'fulfilled' ? qualityResult.value : null;
       const issueRows = issuesResult.status === 'fulfilled' ? issuesResult.value : [];
+      const generationRows = generationResult.status === 'fulfilled' ? generationResult.value : [];
       setProject(projectRow);
       setReview(reviewRow);
       setSnapshots(snapshotRows);
       setQualitySummary(qualityRow);
       setApprovalIssues(issueRows);
+      setGenerationRecords(generationRows);
       setNodes(Object.fromEntries(nodeRows.map((node) => [node.id, node])));
       let planRow: CreativePlan;
       try {
@@ -111,6 +119,7 @@ export default function StoryboardPage() {
         }
         if (!['pending', 'running'].includes(job.status)) {
           setBatchRunning(false);
+          setGenerationRecords(await creativeApi.generations(projectId));
           if (job.failed) setError(`${job.failed} 个模块生成失败，可点击“重试失败模块”。`);
         }
       } catch (err) {
@@ -165,7 +174,6 @@ export default function StoryboardPage() {
         auto_select_materials: true,
         module_id: module.id,
         count: 1,
-        product_lock: productLock,
         variation_axis: variationAxis,
         generation_stage: 'preview',
       });
@@ -181,7 +189,10 @@ export default function StoryboardPage() {
       setFailedIds((current) => current.includes(module.id) ? current : [...current, module.id]);
       if (!quiet) setError(`${module.title}生成失败，请稍后重试。`);
       return false;
-    } finally { setGeneratingId(null); }
+    } finally {
+      setGeneratingId(null);
+      try { setGenerationRecords(await creativeApi.generations(projectId)); } catch { /* 当前页面仍保留本次生成结果 */ }
+    }
   }
 
   function point(event:MouseEvent<HTMLElement>){const box=event.currentTarget.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-box.left)/box.width)),y:Math.max(0,Math.min(1,(event.clientY-box.top)/box.height))};}
@@ -300,7 +311,7 @@ export default function StoryboardPage() {
 
     {error && <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-700">{error}</div>}
     {qualitySummary&&<section className="panel p-4"><div className="flex flex-wrap items-center gap-3"><div className={`w-12 h-12 rounded-full grid place-items-center font-semibold ${qualitySummary.status==='passed'?'bg-emerald-50 text-emerald-800':'bg-amber-50 text-amber-800'}`}>{qualitySummary.score}</div><div className="flex-1"><div className="font-medium">整套详情页质量稳定性</div><div className="text-xs text-[var(--muted)] mt-1">已评分 {qualitySummary.scored_count}/{qualitySummary.module_count} 屏 · {qualitySummary.status==='passed'?'可进入审核':'存在需修正的低质量页面'}</div></div></div>{qualitySummary.issues.length>0&&<div className="mt-3 space-y-2">{qualitySummary.issues.map((issue,index)=><div key={`${issue.module_id}-${index}`} className="rounded-lg bg-red-50 text-red-800 p-3 text-xs"><b>{issue.message}</b><span className="ml-2">{issue.suggestion}</span></div>)}</div>}</section>}
-    <section className="panel p-4 flex flex-wrap items-end gap-3"><label className="text-xs">商品锁定强度<select className="input block mt-1" value={productLock} onChange={event=>setProductLock(event.target.value as typeof productLock)}><option value="strict">严格保持（推荐）</option><option value="balanced">允许轻微调整</option><option value="creative">创意重构</option></select></label><label className="text-xs">候选图差异<select className="input block mt-1" value={variationAxis} onChange={event=>setVariationAxis(event.target.value as typeof variationAxis)}><option value="composition">构图差异</option><option value="scene">场景差异</option><option value="color">色调差异</option><option value="model">模特差异</option><option value="lighting">光影差异</option></select></label><div className="text-xs text-[var(--muted)] flex-1">先用预览级多候选确认方向，选中后再单独进行高清交付和二次质检。</div><button className="btn-secondary" onClick={async()=>setRegression(await creativeApi.qualityRegression(projectId))}>运行质量回归</button>{regression&&<span className={`text-xs rounded-full px-3 py-2 ${regression.status==='passed'?'bg-emerald-50 text-emerald-800':'bg-red-50 text-red-800'}`}>{regression.passed}/{regression.case_count} 通过</span>}</section>
+    <section className="panel p-4 flex flex-wrap items-end gap-3"><label className="text-xs">候选图差异<select className="input block mt-1" value={variationAxis} onChange={event=>setVariationAxis(event.target.value as typeof variationAxis)}><option value="composition">构图差异</option><option value="scene">场景差异</option><option value="color">色调差异</option><option value="model">模特差异</option><option value="lighting">光影差异</option></select></label><div className="text-xs text-[var(--muted)] flex-1">商品素材仅作为模型参考，不再执行生成后的蒙版覆盖或二次叠图。</div><button className="btn-secondary" onClick={async()=>setRegression(await creativeApi.qualityRegression(projectId))}>运行质量回归</button>{regression&&<span className={`text-xs rounded-full px-3 py-2 ${regression.status==='passed'?'bg-emerald-50 text-emerald-800':'bg-red-50 text-red-800'}`}>{regression.passed}/{regression.case_count} 通过</span>}</section>
     {review&&<section className="panel p-4 flex flex-wrap items-center gap-3"><div className="flex-1"><div className="font-medium">项目审核 · 第 {review.round} 轮</div><div className="text-xs text-[var(--muted)] mt-1">当前状态：{({draft:'设计中',submitted:'待运营审核',changes_requested:'已驳回待修改',operational_approved:'运营已通过，待负责人定稿',finalized:'已定稿锁定'} as Record<string,string>)[review.status]||review.status}</div></div>{review.status==='draft'&&<button className="btn-primary" onClick={()=>actReview('submit')}>设计师提交并冻结快照</button>}{review.status==='changes_requested'&&<button className="btn-primary" onClick={()=>actReview('resubmit')}>修改后重新提交</button>}{review.status==='submitted'&&<><button className="btn-primary" onClick={()=>actReview('approve')}>运营审核通过</button><button className="btn-secondary text-red-700" onClick={()=>actReview('reject')}>驳回修改</button></>}{review.status==='operational_approved'&&<><button className="btn-primary" onClick={()=>actReview('finalize')}>负责人定稿并锁定</button><button className="btn-secondary text-red-700" onClick={()=>actReview('reject')}>退回修改</button></>}{review.history.length>0&&<details className="w-full text-xs"><summary className="cursor-pointer text-[var(--accent)]">审核记录（{review.history.length}）</summary><div className="mt-2 space-y-1">{review.history.map(h=><div key={h.id}>{new Date(h.created_at).toLocaleString()} · {h.actor_role} · {h.action}{h.note?`：${h.note}`:''}</div>)}</div></details>}{snapshots.length>0&&<details className="w-full text-xs"><summary className="cursor-pointer text-[var(--accent)]">提交快照与版本差异（{snapshots.length}）</summary><div className="mt-2 space-y-2">{snapshots.map(s=><div className="rounded-lg bg-[var(--bg-elevated)] p-3" key={s.id}><b>v{s.version} · {s.trigger}</b><span className="ml-2 text-[var(--muted)]">{new Date(s.created_at).toLocaleString()} · {s.diff.change_count} 项变化</span>{s.diff.changes.length>0&&<pre className="mt-2 whitespace-pre-wrap text-[10px]">{JSON.stringify(s.diff.changes,null,2)}</pre>}</div>)}</div></details>}</section>}
 
     {approvalIssues.length>0&&<section className="panel p-5"><h2 className="font-medium">驳回修改与前后版对比</h2><div className="mt-4 grid lg:grid-cols-2 gap-4">{approvalIssues.map(issue=>{const module=modules.find(item=>item.id===issue.module_id);const currentId=issue.resolved_node_id||module?.preview_node_id||null;const before=issue.source_node_id?nodes[issue.source_node_id]:null;const after=currentId?nodes[currentId]:null;return <div key={issue.id} className="rounded-xl border border-[var(--border)] p-3"><div className="flex items-center justify-between gap-2 text-xs"><b>{module?.title||`模块 ${issue.module_id}`} · {issue.issue_type}</b><span className={`rounded-full px-2 py-1 ${issue.status==='resolved'?'bg-emerald-50 text-emerald-800':'bg-amber-50 text-amber-800'}`}>{issue.status==='resolved'?'已解决':'待修改'}</span></div><div className="grid grid-cols-2 gap-2 mt-3">{[[before,'驳回版'],[after,'修改版']].map(([node,label])=><div key={String(label)}><div className="aspect-[3/4] rounded-lg bg-[#f1efe9] overflow-hidden grid place-items-center">{(node as CanvasNodeRecord|null)?.data.image_url?<img src={mediaUrl(String((node as CanvasNodeRecord).data.image_url))} className="w-full h-full object-cover"/>:<span className="text-[10px] text-[var(--muted)]">待产生</span>}</div><div className="text-center text-[10px] text-[var(--muted)] mt-1">{String(label)}</div></div>)}</div>{issue.status!=='resolved'&&currentId&&currentId!==issue.source_node_id&&<button className="btn-primary w-full justify-center mt-3" onClick={async()=>{await creativeApi.resolveIssue(projectId,issue.id,currentId);await load()}}><Check size={14}/>确认修改版已解决</button>}</div>})}</div></section>}
@@ -314,6 +325,18 @@ export default function StoryboardPage() {
         ['商品', understanding.name], ['品牌', understanding.brand], ['品类', understanding.category], ['商品原图', `${understanding.image_count || 0} 张`],
       ].map(([label, value]) => <div key={String(label)}><div className="text-[11px] text-[var(--muted)]">{String(label)}</div><div className="mt-1 font-medium">{String(value || '待补充')}</div></div>)}</div><div className="mt-5 pt-4 border-t border-[var(--border)]"><div className="text-[11px] text-[var(--muted)]">目标用户</div><p className="text-sm leading-6 mt-1">{String(understanding.target_users || '待补充')}</p><div className="text-[11px] text-[var(--muted)] mt-3">商品价值</div><p className="text-sm leading-6 mt-1">{String(understanding.core_value || '待补充')}</p></div></div>
       <div className="panel p-5"><div className="flex items-center gap-2 font-medium"><Check size={17} className="text-[var(--accent)]" />AI详情页策略</div><p className="mt-4 text-sm leading-7">{String(strategy.narrative || '')}</p><div className="rounded-xl bg-[#f3f6f4] p-4 mt-4 text-xs leading-6 text-[#4f625c]">视觉规则：{String(strategy.visual_tone || '')}</div><div className="flex flex-wrap gap-2 mt-4"><span className="rounded-full bg-[#f1eee8] px-3 py-1.5 text-xs">{project.platform}</span><span className="rounded-full bg-[#f1eee8] px-3 py-1.5 text-xs">建议 {modules.length} 屏</span>{Array.isArray(strategy.matched_skills) && strategy.matched_skills.map((skill) => <span key={String(skill)} className="rounded-full bg-emerald-50 text-emerald-800 px-3 py-1.5 text-xs">Skill · {String(skill)}</span>)}</div></div>
+    </section>
+
+    <section className="panel overflow-hidden">
+      <button className="w-full p-5 flex items-center justify-between gap-4 text-left" onClick={()=>setShowGenerationRecords(value=>!value)} aria-expanded={showGenerationRecords}>
+        <div className="flex items-center gap-3"><History size={17} className="text-[var(--accent)]"/><div><h2 className="font-medium">生成记录</h2><p className="text-xs text-[var(--muted)] mt-1">本项目共 {generationRecords.length} 次生成，需要排查时展开查看</p></div></div>
+        {showGenerationRecords?<ChevronUp size={17}/>:<ChevronDown size={17}/>}
+      </button>
+      {showGenerationRecords&&<div className="border-t border-[var(--border)] divide-y divide-[var(--border)]">{generationRecords.length===0?<div className="p-8 text-center text-sm text-[var(--muted)]">本项目还没有生成记录</div>:generationRecords.map(record=><div key={record.id} className="p-4 grid md:grid-cols-[1fr_170px_auto] gap-3 items-center">
+        <div className="min-w-0"><div className="text-sm font-medium truncate">{record.module_title||record.action}</div><div className="text-xs text-[var(--muted)] mt-1">任务 #{record.id} · {record.triggered_by} · {TRIGGER_SOURCE[record.trigger_source]||record.trigger_source} · {new Date(record.created_at).toLocaleString()}</div>{record.error_message&&<div className="text-xs text-red-700 mt-1">{record.error_message}{record.suggestion?`；${record.suggestion}`:''}</div>}</div>
+        <div className="text-xs text-[var(--muted)]">{record.provider} · 输出 {record.result_count} 张</div>
+        <div className="flex items-center justify-end gap-2"><span className={`text-xs inline-flex items-center gap-1.5 ${['failed','interrupted'].includes(record.status)?'text-red-700':record.status==='completed'?'text-emerald-700':'text-amber-700'}`}>{record.status==='running'?<Loader2 size={13} className="animate-spin"/>:['failed','interrupted'].includes(record.status)?<AlertCircle size={13}/>:<CheckCircle2 size={13}/>} {GENERATION_STATUS[record.status]||record.status}</span>{['failed','interrupted'].includes(record.status)&&<button className="btn-secondary text-xs" disabled={retryingGeneration===record.id} onClick={async()=>{setRetryingGeneration(record.id);setError('');try{await creativeApi.retryGeneration(projectId,record.id);await load()}catch(err:any){setError(err?.response?.data?.detail||'任务重试失败')}finally{setRetryingGeneration(null)}}}>{retryingGeneration===record.id?<Loader2 size={12} className="animate-spin"/>:<RefreshCw size={12}/>}重试</button>}</div>
+      </div>)}</div>}
     </section>
 
     <section className="panel overflow-hidden">

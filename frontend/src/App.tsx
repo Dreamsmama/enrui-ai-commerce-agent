@@ -5,9 +5,8 @@ import { Loader2 } from 'lucide-react';
 const Layout = lazy(() => import('./components/Layout'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const ProductCreate = lazy(() => import('./pages/ProductCreate'));
+const ProductsPage = lazy(() => import('./pages/Products'));
 const ProductDetail = lazy(() => import('./pages/ProductDetail'));
-const GenerationEditor = lazy(() => import('./pages/GenerationEditor'));
-const HistoryPage = lazy(() => import('./pages/History'));
 const KnowledgePage = lazy(() => import('./pages/Knowledge'));
 const Login = lazy(() => import('./pages/Login'));
 const DesignSkillsPage = lazy(() => import('./pages/DesignSkills'));
@@ -33,9 +32,8 @@ export default function App() {
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="products/new" element={<ProductCreate />} />
+            <Route path="products" element={<ProductsPage />} />
             <Route path="products/:id" element={<ProductDetail />} />
-            <Route path="generations/:id" element={<GenerationEditor />} />
-            <Route path="history" element={<HistoryPage />} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="design-skills" element={<DesignSkillsPage />} />
             <Route path="brand-visuals" element={<BrandVisualsPage />} />

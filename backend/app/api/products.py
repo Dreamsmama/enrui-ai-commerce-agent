@@ -6,14 +6,15 @@ import mimetypes
 import uuid
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.auth import AuthContext, current_auth
 from app.database import get_db
-from app.models import Product, ProductAsset
-from app.schemas import ProductAssetOut, ProductAssetUpdate, ProductCreate, ProductOut, ProductUpdate
+from app.models import LearnedDesignProfile, Product, ProductAsset
+from app.schemas import LearnedDesignProfileOut, ProductAssetOut, ProductAssetUpdate, ProductCreate, ProductOut, ProductUpdate
 from app.services.storage import get_storage
 from app.services.image_postprocess import local_path, product_foreground_mask
 from app.services.llm import get_llm
@@ -49,8 +50,19 @@ def _to_out(product: Product) -> ProductOut:
         learned_profile_enabled=product.learned_profile_enabled,
         created_at=product.created_at,
         updated_at=product.updated_at,
-        generation_count=len(product.generations) if product.generations else 0,
     )
+
+
+@router.get("/{product_id}/learned-design-profile", response_model=Optional[LearnedDesignProfileOut])
+def get_learned_design_profile(product_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+    product = db.query(Product).filter(Product.id == product_id, Product.tenant_id == auth.tenant_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="商品不存在")
+    return db.query(LearnedDesignProfile).filter(
+        LearnedDesignProfile.tenant_id == auth.tenant_id,
+        LearnedDesignProfile.brand_name == product.brand_name,
+        LearnedDesignProfile.category == product.category,
+    ).first()
 
 
 @router.get("", response_model=list[ProductOut])

@@ -3,16 +3,12 @@ import type {
   DashboardStats,
   DesignSkill,
   DesignSkillCreate,
-  ImageReview,
   LearnedDesignProfile,
   CreativeProject,
+  CreativeGenerationRecord,
   CreativePlan,
   CanvasNodeRecord,
   CreativeFeedback,
-  EditHistory,
-  EditRequest,
-  Generation,
-  GenerationListItem,
   KnowledgeDoc,
   Product,
   ProductAsset,
@@ -105,35 +101,6 @@ export const productApi = {
   uploadMask:async(productId:number,assetId:number,file:File)=>{const form=new FormData();form.append('file',file);return api.post<ProductAsset>(`/products/${productId}/assets/${assetId}/mask`,form).then(r=>r.data)},
 };
 
-export const generationApi = {
-  start: (productId: number) =>
-    api.post<Generation>(`/products/${productId}/generate`).then((r) => r.data),
-  list: (productId?: number) =>
-    api
-      .get<GenerationListItem[]>('/generations', {
-        params: productId != null ? { product_id: productId } : undefined,
-      })
-      .then((r) => r.data),
-  get: (id: number) => api.get<Generation>(`/generations/${id}`).then((r) => r.data),
-  remove: (id: number) => api.delete(`/generations/${id}`).then((r) => r.data),
-  retry: (id: number) => api.post<Generation>(`/generations/${id}/retry`).then((r) => r.data),
-  edit: (id: number, payload: EditRequest) =>
-    api.post<Generation>(`/generations/${id}/edit`, payload).then((r) => r.data),
-  edits: (id: number) =>
-    api.get<EditHistory[]>(`/generations/${id}/edits`).then((r) => r.data),
-  updateModules: (id: number, sections: Record<string, string>, moduleOrder: string[]) =>
-    api
-      .put<Generation>(`/generations/${id}/modules`, {
-        sections,
-        module_order: moduleOrder,
-      })
-      .then((r) => r.data),
-  imageReviews: (id: number) => api.get<ImageReview[]>(`/generations/${id}/image-reviews`).then((r) => r.data),
-  reviewImage: (id: number, moduleKey: string, payload: { status: ImageReview['status']; reasons: string[]; note?: string }) =>
-    api.put<ImageReview>(`/generations/${id}/visual-modules/${moduleKey}/review`, payload).then((r) => r.data),
-  learnedProfile: (productId: number) => api.get<LearnedDesignProfile | null>(`/products/${productId}/learned-design-profile`).then((r) => r.data),
-};
-
 export const knowledgeApi = {
   list: (productId?: number) =>
     api
@@ -194,6 +161,8 @@ export const creativeApi = {
   nodes: (id: number) => api.get<CanvasNodeRecord[]>(`/creative-projects/${id}/nodes`).then((r) => r.data),
   saveCanvas: (id: number, nodes: Array<Partial<CanvasNodeRecord> & { id: string; node_type: string; position_x: number; position_y: number; data: Record<string, unknown> }>, viewport: Record<string, number>) => api.put<CanvasNodeRecord[]>(`/creative-projects/${id}/canvas`, { nodes, viewport }).then((r) => r.data),
   generate: (id: number, data: { prompt: string; action: string; selected_node_ids: string[]; parent_node_id?: string | null; auto_select_materials: boolean; module_id?: number; count: number; product_lock?: 'strict'|'balanced'|'creative'; variation_axis?: 'composition'|'scene'|'color'|'model'|'lighting'; generation_stage?: 'preview'|'final' }) => api.post<{ generation: { context_snapshot?: Record<string, unknown> }; nodes: CanvasNodeRecord[] }>(`/creative-projects/${id}/generate`, data, { timeout: 600000 }).then((r) => r.data),
+  generations: (id: number) => api.get<CreativeGenerationRecord[]>(`/creative-projects/${id}/generations`).then((r) => r.data),
+  retryGeneration: (projectId: number, generationId: number) => api.post(`/creative-projects/${projectId}/generations/${generationId}/retry`, undefined, { timeout: 600000 }).then((r) => r.data),
   getPlan: (id: number) => api.get<CreativePlan>(`/creative-projects/${id}/plan`).then((r) => r.data),
   generatePlan: (id: number) => api.post<CreativePlan>(`/creative-projects/${id}/plan`).then((r) => r.data),
   updatePlanModules: (id: number, modules: Array<Pick<CreativePlan['modules'][number], 'sort_order' | 'module_type' | 'title' | 'objective' | 'content_guidance' | 'visual_direction' | 'production_method' | 'required'>>) => api.put<CreativePlan>(`/creative-projects/${id}/plan/modules`, { modules }).then((r) => r.data),
@@ -265,7 +234,7 @@ export const operationsApi = {
   taskDetail: (id:number) => api.get(`/operations/tasks/detail/${id}`).then(r=>r.data),
   retryTasks: (ids:number[]) => api.post('/operations/tasks/retry',{ids}).then(r=>r.data),
   cancelTasks: (ids:number[]) => api.post('/operations/tasks/cancel',{ids}).then(r=>r.data),
-  taskStatistics: () => api.get('/operations/tasks/statistics').then(r=>r.data),
+  taskStatistics: (params: Record<string, string | number> = {}) => api.get('/operations/tasks/statistics',{params}).then(r=>r.data),
   billingStatus: () => api.get('/operations/billing/status').then(r=>r.data),
   syncBilling: () => api.post('/operations/billing/sync').then(r=>r.data),
   projectReviews: (id:number) => api.get(`/operations/projects/${id}/reviews`).then(r=>r.data),
@@ -290,6 +259,6 @@ export const productionApi = {
   dashboard:()=>api.get('/production/dashboard').then(r=>r.data),
 };
 
-export interface CreativeMetrics { total_tasks: number; completed: number; failed: number; success_rate: number; image_count: number; estimated_cost_cny: number; cost_source: 'estimated' | 'provider_bill'; cost_note: string; monthly_budget_cny: number; budget_usage_percent: number; max_concurrency: number; running: number; error_breakdown: Record<string, number>; providers: string[]; recent_tasks: Array<{ id: number; project_id: number; action: string; provider: string; status: string; result_count: number; diagnostic?: { code: string; title: string; suggestion: string; retryable: boolean }; created_at: string }> }
+export interface CreativeMetrics { total_tasks: number; completed: number; failed: number; success_rate: number; image_count: number; estimated_cost_cny: number; cost_source: 'estimated' | 'provider_bill'; cost_note: string; monthly_budget_cny: number; budget_usage_percent: number; max_concurrency: number; running: number; error_breakdown: Record<string, number>; providers: string[]; recent_tasks: Array<{ id: number; project_id: number; action: string; provider: string; status: string; result_count: number; diagnostic?: { code: string; title: string; suggestion: string; retryable: boolean }; triggered_by: string; trigger_source: string; created_at: string }> }
 
 export default api;
