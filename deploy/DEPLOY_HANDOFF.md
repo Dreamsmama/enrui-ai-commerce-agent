@@ -2,7 +2,7 @@
 
 ## 一、目标
 
-将 GitHub 仓库 `Dreamsmama/enrui-ai-commerce-agent` 的 `main` 分支部署到阿里云 Ubuntu 22.04 服务器，并确认前端、后端、PostgreSQL、Redis 和 OSS 全部正常工作。
+将 GitHub 仓库 `Dreamsmama/enrui-ai-commerce-agent` 的 `main` 分支一键部署到阿里云 Ubuntu 22.04 服务器，并确认网页和后端服务正常运行。
 
 目标服务器：`121.199.52.72`。
 
@@ -20,6 +20,8 @@
 - 部署前强制检查PostgreSQL、Redis、OSS，任意服务不可用即停止部署。
 - 自动拉取 `main` 最新代码、构建镜像、更新容器和健康检查。
 - 生产密钥独立保存在服务器，不进入Git仓库。
+
+线上数据库 `enrui_ai_commerce_agent` 及现有37张业务表已经初始化完成。同事不需要建库、手工建表、执行SQL或迁移本地数据。部署脚本中的数据库步骤只进行幂等结构检查：已有表不会重复创建、清空或覆盖。
 
 核心部署入口：
 
@@ -65,7 +67,7 @@ bash /opt/enrui-ai-commerce-agent/repository/deploy.sh
 
 脚本会自动安装Git和Docker。首次运行会生成生产配置文件并主动停止，这是正常行为。
 
-### 3. 填写生产配置
+### 3. 填写服务器运行配置
 
 编辑：
 
@@ -75,7 +77,7 @@ nano /opt/enrui-ai-commerce-agent/shared/.env
 
 必须填写或确认：
 
-- `DATABASE_URL`：线上 `enrui_ai_commerce_agent` 数据库连接串。
+- `DATABASE_URL`：确认指向已经建好的线上 `enrui_ai_commerce_agent`，不要改成 `canvas_platform` 或SQLite。
 - `REDIS_URL`：线上Redis连接串。
 - `ALIYUN_OSS_ACCESS_KEY_ID`：轮换后的OSS RAM AccessKey。
 - `ALIYUN_OSS_ACCESS_KEY_SECRET`：轮换后的OSS RAM Secret。
@@ -97,7 +99,7 @@ grep -n 'FILL_' /opt/enrui-ai-commerce-agent/shared/.env
 bash /opt/enrui-ai-commerce-agent/repository/deploy.sh
 ```
 
-脚本会依次执行：拉取最新代码、构建镜像、检查并初始化线上数据服务、启动容器、执行健康检查。
+脚本会依次执行：拉取最新代码、构建镜像、幂等检查现有数据库表及线上服务连接、启动容器、执行健康检查。无需额外执行建库、建表或数据迁移命令。
 
 ### 5. 验收
 
@@ -122,14 +124,12 @@ storage=aliyun_oss
 http://121.199.52.72
 ```
 
-完成一次最小业务验收：
+完成基础部署验收：
 
-1. 注册首个企业Owner账号并登录。
-2. 创建一个测试商品。
-3. 上传一张商品图片，确认页面能显示。
-4. 在OSS的 `enrui-ai-commerce-agent/` 前缀下确认新对象存在。
-5. 创建一次测试生成任务，确认任务可以开始并更新状态。
-6. 确认PostgreSQL对应业务表出现记录。
+1. 公网打开登录页面，静态资源加载正常。
+2. 调用 `/api/health`，确认PostgreSQL、Redis和OSS状态正常。
+3. 登录一个已有账号；如果线上还没有账号，再注册首个企业Owner。
+4. 页面刷新和前端路由跳转不出现404。
 
 ## 四、以后更新代码
 
@@ -168,7 +168,6 @@ curl -i http://127.0.0.1/api/health
 - 公网可以打开登录页面。
 - 健康接口显示PostgreSQL、Redis、OSS均正常。
 - 上传文件实际进入OSS，而不是服务器持久目录。
-- 新业务数据实际写入线上PostgreSQL。
-- 任务创建后Redis协调正常，无重复消费。
+- 线上PostgreSQL连接正常，部署过程没有修改或迁移既有业务数据。
 - 生产 `.env` 权限为600且未进入Git。
 - 将访问地址、部署提交ID和验收结果回复项目负责人。
