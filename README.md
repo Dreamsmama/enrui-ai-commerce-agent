@@ -8,6 +8,8 @@
 
 ## 阿里云一键部署
 
+完整服务器交接和验收清单见 [`deploy/DEPLOY_HANDOFF.md`](deploy/DEPLOY_HANDOFF.md)。
+
 服务器要求：Ubuntu 22.04+、root 权限，安全组开放 TCP 80。首次部署在服务器执行：
 
 ```bash
@@ -15,7 +17,7 @@ git clone https://github.com/Dreamsmama/enrui-ai-commerce-agent.git /opt/enrui-a
 bash /opt/enrui-ai-commerce-agent/repository/deploy.sh
 ```
 
-首次运行会创建 `/opt/enrui-ai-commerce-agent/shared/.env` 并停止。填写其中全部 `FILL_` 配置后再次执行同一条 `deploy.sh` 命令即可完成建表、构建、启动和健康检查。
+首次运行会创建 `/opt/enrui-ai-commerce-agent/shared/.env` 并停止。填写其中全部 `FILL_` 配置后再次执行同一条 `deploy.sh` 命令即可完成幂等检查、构建、启动和健康检查。部署日志保存在 `/opt/enrui-ai-commerce-agent/shared/logs/`；新版本健康检查失败时会自动回退到上一次运行中的镜像。
 
 以后代码 push 到 `main` 后，在服务器只需执行：
 
