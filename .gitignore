@@ -5,11 +5,31 @@ __pycache__/
 venv/
 *.db
 .env
+.env.*
+!.env.example
+!backend/.env.example
+!deploy/.env.production.example
 uploads/
 backend/uploads/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local runtime and deployment output
+*.pid
+*.tmp
+*.swp
+deploy/logs/
+output/
+
+# Browser automation artifacts
+.playwright-cli/
+.playwright-mcp/
 
 # Node
 node_modules/
 dist/
 .DS_Store
 *.log
+.npm/
+.eslintcache
