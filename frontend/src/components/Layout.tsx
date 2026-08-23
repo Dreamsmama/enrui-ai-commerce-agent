@@ -2,9 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard,
   PackagePlus,
-  History,
   BookOpen,
-  Sparkles,
   Palette,
   PanelsTopLeft,
   Activity,
@@ -14,17 +12,31 @@ import {
 } from 'lucide-react';
 
 const nav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/products/new', label: '创建商品', icon: PackagePlus },
-  { to: '/history', label: '历史管理', icon: History },
+  { to: '/', label: '工作台', icon: LayoutDashboard, end: true },
+  { to: '/products', label: '商品管理', icon: PackagePlus },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
   { to: '/brand-visuals', label: '品牌视觉', icon: Palette },
   { to: '/design-skills', label: '设计 Skill', icon: Palette },
-  { to: '/detail-templates', label: '详情页模板', icon: LayoutTemplate },
-  { to: '/production', label: '批量生产看板', icon: Factory },
   { to: '/creative-projects', label: 'AI 创作工作台', icon: PanelsTopLeft },
   { to: '/task-center', label: '任务与费用', icon: Activity },
-  { to: '/quality', label: '质量与审核', icon: ShieldCheck },
+];
+
+const plannedFeatures = [
+  {
+    label: '详情页模板',
+    icon: LayoutTemplate,
+    description: '复用已验证的详情页结构，待模板使用闭环完善后开放',
+  },
+  {
+    label: '批量生产',
+    icon: Factory,
+    description: '通过 CSV 批量创建商品并生成详情页，暂未开放',
+  },
+  {
+    label: '质量中心',
+    icon: ShieldCheck,
+    description: '集中配置质检规则、管理审核与质量反馈，暂未开放',
+  },
 ];
 
 export default function Layout() {
@@ -36,15 +48,8 @@ export default function Layout() {
     <div className="min-h-screen flex bg-[var(--bg)] text-[var(--text)]">
       <aside className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--panel)] flex flex-col">
         <div className="px-5 py-6 border-b border-[var(--border)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-[var(--accent)] text-white flex items-center justify-center">
-              <Sparkles size={18} />
-            </div>
-            <div>
-              <div className="font-display text-lg leading-tight tracking-tight">Enrui AI</div>
-              <div className="text-xs text-[var(--muted)]">Commerce Agent</div>
-            </div>
-          </div>
+          <div className="font-display text-3xl leading-none">Dirovo</div>
+          <div className="mt-1 font-display text-base leading-none tracking-[0.08em]">蒂洛薇</div>
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {nav.map((item) => (
@@ -64,6 +69,25 @@ export default function Layout() {
               {item.label}
             </NavLink>
           ))}
+          <div className="pt-4 mt-4 border-t border-[var(--border)]">
+            <div className="px-3 mb-2 text-[11px] font-medium tracking-wide text-[var(--muted)]">
+              规划中
+            </div>
+            {plannedFeatures.map((item) => (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-[var(--muted)] opacity-70 cursor-not-allowed"
+                title={item.description}
+                aria-disabled="true"
+              >
+                <item.icon size={18} />
+                <span className="flex-1">{item.label}</span>
+                <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] leading-none">
+                  规划中
+                </span>
+              </div>
+            ))}
+          </div>
         </nav>
         <div className="p-4 border-t border-[var(--border)] text-xs text-[var(--muted)]">
           多模态 Agent · RAG · 电商详情页

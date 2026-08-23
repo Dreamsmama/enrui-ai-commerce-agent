@@ -73,7 +73,11 @@ class ArkSeedreamImageProvider:
         height: int,
         project_id: int,
     ) -> list[str]:
-        image_inputs = [_image_input(url) for url in (source_urls or [source_url])[:10] if url]
+        # An explicit empty list means "generate a background plate without
+        # reference images". Only fall back to source_url when the caller did
+        # not provide source_urls at all.
+        input_urls = [source_url] if source_urls is None else source_urls
+        image_inputs = [_image_input(url) for url in input_urls[:10] if url]
         urls: list[str] = []
         with httpx.Client(timeout=self.timeout) as client:
             for index in range(count):
@@ -123,7 +127,8 @@ class LocalDemoImageProvider:
         height: int,
         project_id: int,
     ) -> list[str]:
-        source_paths = [path for url in (source_urls or [source_url]) if (path := _local_path(url))]
+        input_urls = [source_url] if source_urls is None else source_urls
+        source_paths = [path for url in input_urls if (path := _local_path(url))]
         sources = [Image.open(path).convert("RGB") for path in source_paths]
         if not sources:
             sources = [Image.new("RGB", (width, height), "#eef3ef")]

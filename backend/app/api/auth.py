@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AuthContext, create_token, current_auth, hash_password, verify_password
 from app.database import get_db
-from app.models import Generation, KnowledgeDocument, Product, ProductAsset, Tenant, TenantMember, User
+from app.models import KnowledgeDocument, Product, ProductAsset, Tenant, TenantMember, User
 from app.schemas import AuthOut, LoginRequest, RegisterRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -27,7 +27,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthOut
     db.add_all([tenant, user]); db.flush()
     db.add(TenantMember(tenant_id=tenant.id, user_id=user.id, role="owner"))
     if db.query(TenantMember).count() == 1:
-        for model in (Product, Generation, KnowledgeDocument, ProductAsset):
+        for model in (Product, KnowledgeDocument, ProductAsset):
             db.query(model).filter(model.tenant_id == "default").update({"tenant_id": tenant.id})
     db.commit()
     return _response(user, tenant, "owner")

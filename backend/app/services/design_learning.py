@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Any
 
 from app.database import SessionLocal
-from app.models import CreativeFeedback, ImageReview, LearnedDesignProfile, Product, SkillCandidate
+from app.models import CreativeFeedback, LearnedDesignProfile, Product, SkillCandidate
 from app.services.llm import get_llm
 
 logger = logging.getLogger(__name__)
@@ -25,19 +25,12 @@ def _top(values: list[str], limit: int = 5) -> list[dict[str, Any]]:
 
 
 def _rebuild_profile(db, product: Product) -> LearnedDesignProfile:
-    reviews = db.query(ImageReview).join(Product, Product.id == ImageReview.product_id).filter(
-        ImageReview.tenant_id == product.tenant_id,
-        Product.brand_name == product.brand_name,
-        Product.category == product.category,
-        ImageReview.learning_status == "completed",
-    ).all()
-    creative_feedback = db.query(CreativeFeedback).join(Product, Product.id == CreativeFeedback.product_id).filter(
+    reviews = db.query(CreativeFeedback).join(Product, Product.id == CreativeFeedback.product_id).filter(
         CreativeFeedback.tenant_id == product.tenant_id,
         Product.brand_name == product.brand_name,
         Product.category == product.category,
         CreativeFeedback.learning_status == "completed",
     ).all()
-    reviews = [*reviews, *creative_feedback]
     profile = db.query(LearnedDesignProfile).filter(
         LearnedDesignProfile.tenant_id == product.tenant_id,
         LearnedDesignProfile.brand_name == product.brand_name,
@@ -117,63 +110,6 @@ def _rebuild_profile(db, product: Product) -> LearnedDesignProfile:
             db.add(SkillCandidate(tenant_id=product.tenant_id, profile_id=profile.id, name=payload["name"], brand_name=product.brand_name, category=product.category, confidence=profile.confidence, sample_count=len(reviews), payload=payload))
         db.commit()
     return profile
-
-
-async def analyze_review(review_id: int) -> None:
-    db = SessionLocal()
-    try:
-        review = db.query(ImageReview).filter(ImageReview.id == review_id).first()
-        if not review:
-            return
-        product = db.query(Product).filter(Product.id == review.product_id).first()
-        if not product:
-            return
-        review.learning_status = "analyzing"
-        db.commit()
-        prompt = f"""你是美妆电商视觉分析师。分析这张已经被设计师评价的详情页模块图片，只描述可观察的视觉特征，不推测设计师身份。
-
-商品：{product.name}
-品牌：{product.brand_name}
-品类：{product.category}
-模块：{review.module_title}
-设计师评价：{review.status}
-快捷原因：{'、'.join(review.reasons or []) or '未填写'}
-补充说明：{review.note or '无'}
-
-输出 JSON：
-{{
-  "style_tags": ["2-5个短标签"],
-  "palette_tags": ["2-5个色彩标签"],
-  "composition_tags": ["2-5个构图标签"],
-  "lighting_tags": ["1-3个光影标签"],
-  "product_presentation_tags": ["2-5个商品呈现标签"],
-  "text_density": "低/中/高",
-  "strengths": ["被采用时可能值得复用的可观察特征"],
-  "risks": ["被拒绝或需修改时可观察的问题"]
-}}"""
-        source = review.image_url
-        analysis = await get_llm().chat_vision(
-            prompt,
-            [source],
-            system_prompt="你只做视觉特征标注，输出简洁 JSON。",
-            temperature=0.2,
-            max_tokens=1200,
-            as_json=True,
-        )
-        review.visual_analysis = analysis
-        review.learning_status = "completed"
-        db.commit()
-        _rebuild_profile(db, product)
-    except Exception as exc:
-        logger.exception("Design learning failed for review %s", review_id)
-        db.rollback()
-        review = db.query(ImageReview).filter(ImageReview.id == review_id).first()
-        if review:
-            review.learning_status = "failed"
-            review.visual_analysis = {"error": str(exc)}
-            db.commit()
-    finally:
-        db.close()
 
 
 async def analyze_creative_feedback(feedback_id: int) -> None:

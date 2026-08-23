@@ -7,12 +7,13 @@ import uuid
 import time
 import asyncio
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from PIL import Image, ImageOps
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.auth import AuthContext, current_auth
@@ -57,6 +58,11 @@ def _batch_out(job: CreativeBatchJob) -> dict:
     return {"id": job.id, "project_id": job.project_id, "status": job.status, "module_ids": job.module_ids, "module_results": job.module_results, "total": job.total, "completed": job.completed, "failed": job.failed, "current_module_id": job.current_module_id, "stop_requested": job.stop_requested, "created_at": job.created_at, "updated_at": job.updated_at}
 
 
+def _generation_duration_ms(started_at: float) -> int:
+    """Return a non-negative duration without masking generation errors."""
+    return max(0, int((time.perf_counter() - started_at) * 1000))
+
+
 def _run_storyboard_batch(job_id: str, tenant_id: str, user_id: str, role: str, email: str, tenant_name: str) -> None:
     db = SessionLocal()
     try:
@@ -75,7 +81,7 @@ def _run_storyboard_batch(job_id: str, tenant_id: str, user_id: str, role: str, 
                 job.module_results = [*job.module_results, {"module_id": module_id, "status": "failed", "error": "模块不存在"}]
                 db.commit(); continue
             job.current_module_id = module_id; db.commit()
-            payload = CreativeGenerateRequest(prompt=f"{module.objective}。{module.content_guidance}。{module.visual_direction}", action=f"详情页·{module.title}", selected_node_ids=[], auto_select_materials=True, module_id=module.id, count=1)
+            payload = CreativeGenerateRequest(prompt=f"{module.objective}。{module.content_guidance}。{module.visual_direction}", action=f"详情页·{module.title}", selected_node_ids=[], auto_select_materials=True, module_id=module.id, count=1, trigger_source="batch")
             try:
                 generate_variants(job.project_id, payload, db, auth)
                 job.completed += 1
@@ -83,7 +89,8 @@ def _run_storyboard_batch(job_id: str, tenant_id: str, user_id: str, role: str, 
             except Exception as exc:
                 job.failed += 1
                 detail = getattr(exc, "detail", str(exc))
-                job.module_results = [*job.module_results, {"module_id": module_id, "status": "failed", "error": str(detail)}]
+                error = detail if isinstance(detail, dict) else {"title": "生成失败", "message": str(detail), "suggestion": "请检查输入或稍后重试。", "retryable": True}
+                job.module_results = [*job.module_results, {"module_id": module_id, "status": "failed", "error": error}]
             db.commit()
         job.current_module_id = None
         job.status = "completed_with_errors" if job.failed else "completed"
@@ -193,14 +200,23 @@ def list_projects(db: Session = Depends(get_db), auth: AuthContext = Depends(cur
 
 
 @router.get("/metrics/summary")
-def creative_metrics(project_id: Optional[int] = None, provider: str = "", status: str = "", date_from: str = "", date_to: str = "", db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+def creative_metrics(project_id: Optional[int] = None, provider: str = "", status: str = "", date_from: str = "", date_to: str = "", error_code: str = "", db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
     query = db.query(CreativeGeneration).filter(CreativeGeneration.tenant_id == auth.tenant_id)
     if project_id is not None: query = query.filter(CreativeGeneration.project_id == project_id)
     if provider: query = query.filter(CreativeGeneration.provider == provider)
-    if status: query = query.filter(CreativeGeneration.status == status)
+    if status == "attention":
+        stale_before = datetime.utcnow() - timedelta(minutes=30)
+        query = query.filter(or_(
+            CreativeGeneration.status == "failed",
+            and_(CreativeGeneration.status == "running", CreativeGeneration.updated_at < stale_before),
+        ))
+    elif status:
+        query = query.filter(CreativeGeneration.status == status)
     if date_from: query = query.filter(CreativeGeneration.created_at >= date_from)
     if date_to: query = query.filter(CreativeGeneration.created_at <= f"{date_to} 23:59:59")
     jobs = query.order_by(CreativeGeneration.created_at.desc()).all()
+    if error_code:
+        jobs = [job for job in jobs if job.status == "failed" and ((((job.context_snapshot or {}).get("diagnostic") or {}).get("code")) or "unknown") == error_code]
     completed = [job for job in jobs if job.status == "completed"]
     failed = [job for job in jobs if job.status == "failed"]
     image_count = sum(len(job.result_node_ids or []) for job in completed)
@@ -210,17 +226,50 @@ def creative_metrics(project_id: Optional[int] = None, provider: str = "", statu
     for job in failed:
         code = (job.context_snapshot or {}).get("diagnostic", {}).get("code", "unknown")
         diagnostics[code] = diagnostics.get(code, 0) + 1
-    return {"total_tasks": len(jobs), "completed": len(completed), "failed": len(failed), "success_rate": round(len(completed) / len(jobs) * 100, 1) if jobs else 0, "image_count": image_count, "estimated_cost_cny": estimated_cost, "cost_source": "estimated", "cost_note": "按成功生成图片数和配置单价估算，尚未接入火山方舟账单 API。", "monthly_budget_cny": settings.tenant_monthly_budget_cny, "budget_usage_percent": round(estimated_cost / settings.tenant_monthly_budget_cny * 100, 1) if settings.tenant_monthly_budget_cny else 0, "max_concurrency": settings.tenant_max_concurrent_generations, "running": sum(job.status == "running" for job in jobs), "error_breakdown": diagnostics, "providers": sorted({job.provider for job in db.query(CreativeGeneration).filter(CreativeGeneration.tenant_id == auth.tenant_id).all()}), "recent_tasks": [{"id": job.id, "project_id": job.project_id, "action": job.action, "provider": job.provider, "status": job.status, "result_count": len(job.result_node_ids or []), "diagnostic": (job.context_snapshot or {}).get("diagnostic"), "created_at": job.created_at} for job in jobs[:100]]}
+    return {"total_tasks": len(jobs), "completed": len(completed), "failed": len(failed), "success_rate": round(len(completed) / len(jobs) * 100, 1) if jobs else 0, "image_count": image_count, "estimated_cost_cny": estimated_cost, "cost_source": "estimated", "cost_note": "按成功生成图片数和配置单价估算，尚未接入火山方舟账单 API。", "monthly_budget_cny": settings.tenant_monthly_budget_cny, "budget_usage_percent": round(estimated_cost / settings.tenant_monthly_budget_cny * 100, 1) if settings.tenant_monthly_budget_cny else 0, "max_concurrency": settings.tenant_max_concurrent_generations, "running": sum(job.status == "running" for job in jobs), "error_breakdown": diagnostics, "providers": sorted({job.provider for job in db.query(CreativeGeneration).filter(CreativeGeneration.tenant_id == auth.tenant_id).all()}), "recent_tasks": [{"id": job.id, "project_id": job.project_id, "action": job.action, "provider": job.provider, "status": "interrupted" if job.status == "running" and job.updated_at < datetime.utcnow() - timedelta(minutes=30) else job.status, "result_count": len(job.result_node_ids or []), "diagnostic": (job.context_snapshot or {}).get("diagnostic"), "triggered_by": ((job.context_snapshot or {}).get("triggered_by") or {}).get("email") or "历史任务未记录", "trigger_source": (job.context_snapshot or {}).get("trigger_source") or "unknown", "created_at": job.created_at} for job in jobs[:100]]}
 
 
 @router.post("/{project_id}/generations/{generation_id}/retry")
 def retry_creative_generation(project_id: int, generation_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
     job = db.query(CreativeGeneration).filter(CreativeGeneration.id == generation_id, CreativeGeneration.project_id == project_id, CreativeGeneration.tenant_id == auth.tenant_id).first()
     if not job: raise HTTPException(404, "生成任务不存在")
+    if job.status == "running" and job.updated_at < datetime.utcnow() - timedelta(minutes=30):
+        job.status = "failed"; job.error_message = "生成任务已中断，可重新生成"; db.commit()
     if job.status != "failed": raise HTTPException(400, "仅失败任务可以重试")
     module_id = (job.context_snapshot or {}).get("module_id")
-    payload = CreativeGenerateRequest(prompt=job.prompt, action=job.action, selected_node_ids=job.selected_node_ids or [], parent_node_id=job.parent_node_id, auto_select_materials=not bool(job.selected_node_ids), module_id=module_id, count=max(1, min(6, (job.context_snapshot or {}).get("requested_count", 1))))
+    payload = CreativeGenerateRequest(prompt=job.prompt, action=job.action, selected_node_ids=job.selected_node_ids or [], parent_node_id=job.parent_node_id, auto_select_materials=not bool(job.selected_node_ids), module_id=module_id, count=max(1, min(6, (job.context_snapshot or {}).get("requested_count", 1))), trigger_source="retry")
     return generate_variants(project_id, payload, db, auth)
+
+
+@router.get("/{project_id}/generations")
+def project_generations(project_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+    _project(db, project_id, auth.tenant_id)
+    modules = db.query(StoryboardModule).filter_by(project_id=project_id, tenant_id=auth.tenant_id).all()
+    module_titles = {module.id: module.title for module in modules}
+    jobs = db.query(CreativeGeneration).filter_by(project_id=project_id, tenant_id=auth.tenant_id).order_by(CreativeGeneration.created_at.desc()).limit(100).all()
+    rows = []
+    stale_before = datetime.utcnow() - timedelta(minutes=30)
+    for job in jobs:
+        context = job.context_snapshot or {}
+        triggered_by = context.get("triggered_by") or {}
+        diagnostic = context.get("diagnostic") or {}
+        status = "interrupted" if job.status == "running" and job.updated_at < stale_before else job.status
+        module_id = context.get("module_id")
+        rows.append({
+            "id": job.id,
+            "module_id": module_id,
+            "module_title": module_titles.get(module_id, job.action),
+            "action": job.action,
+            "status": status,
+            "provider": job.provider,
+            "result_count": len(job.result_node_ids or []),
+            "triggered_by": triggered_by.get("email") or "历史任务未记录",
+            "trigger_source": context.get("trigger_source") or "unknown",
+            "error_message": diagnostic.get("title") or job.error_message or "",
+            "suggestion": diagnostic.get("suggestion") or ("进入项目重新生成该页面" if status == "interrupted" else ""),
+            "created_at": f"{job.created_at.isoformat()}Z",
+        })
+    return rows
 
 
 @router.post("", response_model=CreativeProjectOut)
@@ -267,7 +316,17 @@ def get_plan(project_id: int, db: Session = Depends(get_db), auth: AuthContext =
 
 @router.post("/{project_id}/plan", response_model=CreativePlanOut)
 def generate_plan(project_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
-    project = _project(db, project_id, auth.tenant_id)
+    # React StrictMode can issue the initial plan request twice in development.
+    # Serialize plan creation per project so concurrent POSTs do not both try to
+    # insert the same CreativePlan and StoryboardModule rows.
+    project = (
+        db.query(CreativeProject)
+        .filter(CreativeProject.id == project_id, CreativeProject.tenant_id == auth.tenant_id)
+        .with_for_update()
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="创意项目不存在")
     product = db.query(Product).filter(Product.id == project.product_id, Product.tenant_id == auth.tenant_id).first()
     documents = db.query(KnowledgeDocument).filter(KnowledgeDocument.tenant_id == auth.tenant_id, KnowledgeDocument.brand_name == product.brand_name).all()
     skills = db.query(DesignSkill).filter(DesignSkill.tenant_id == auth.tenant_id, DesignSkill.enabled.is_(True)).all()
@@ -445,7 +504,6 @@ def create_batch_generation(project_id: int, payload: StoryboardBatchCreate, bac
         raise HTTPException(status_code=409, detail="没有需要生成的模块")
     job = CreativeBatchJob(id=uuid.uuid4().hex, tenant_id=auth.tenant_id, project_id=project_id, status="pending", module_ids=[module.id for module in targets], total=len(targets))
     db.add(job); db.commit(); db.refresh(job)
-    generation_started = time.perf_counter()
     background_tasks.add_task(_run_storyboard_batch, job.id, auth.tenant_id, auth.user_id, auth.role, auth.email, auth.tenant_name)
     return _batch_out(job)
 
@@ -495,6 +553,7 @@ def save_canvas(project_id: int, payload: CanvasSaveRequest, db: Session = Depen
 
 @router.post("/{project_id}/generate")
 def generate_variants(project_id: int, payload: CreativeGenerateRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+    generation_started = time.perf_counter()
     project = _project(db, project_id, auth.tenant_id)
     if project.review_status == "finalized": raise HTTPException(409, "项目已定稿，请复制为新项目后再生成")
     settings = get_settings()
@@ -542,6 +601,8 @@ def generate_variants(project_id: int, payload: CreativeGenerateRequest, db: Ses
         "parameter_version": get_settings().generation_parameter_version,
         "seed": None,
         "seed_supported": False,
+        "triggered_by": {"user_id": auth.user_id, "email": auth.email, "role": auth.role},
+        "trigger_source": payload.trigger_source,
     }
     module_prompt = ""
     if storyboard_module:
@@ -550,12 +611,14 @@ def generate_variants(project_id: int, payload: CreativeGenerateRequest, db: Ses
     fact_prompt = "\n已确认商品事实（只能使用这些事实，不得采用冲突或待确认信息）：\n" + "\n".join(f"- {fact.label}：{fact.value}" for fact in confirmed_facts) if confirmed_facts else ""
     raw_prompt = f"{project.brief}\n{payload.prompt}{module_prompt}{brand_prompt}{fact_prompt}\n品牌：{product.brand_name}；商品：{product.name}；已匹配 Skill：{'、'.join(skill.name for skill in matched_skills) or '无'}"
     prompt_check=validate_and_rewrite_prompt(raw_prompt,storyboard_module.title if storyboard_module else payload.action,[{"id":f.id} for f in confirmed_facts])
-    effective_prompt = apply_generation_controls(prompt_check["corrected"], payload.product_lock, payload.variation_axis, payload.generation_stage)
+    protection_enabled = settings.product_protection_enabled
+    effective_product_lock = payload.product_lock if protection_enabled else "balanced"
+    effective_prompt = apply_generation_controls(prompt_check["corrected"], effective_product_lock, payload.variation_axis, payload.generation_stage)
     context_snapshot["prompt_check"]=prompt_check
-    context_snapshot["generation_controls"]={"product_lock":payload.product_lock,"variation_axis":payload.variation_axis,"stage":payload.generation_stage}
+    context_snapshot["generation_controls"]={"product_lock":effective_product_lock,"requested_product_lock":payload.product_lock,"product_protection_enabled":protection_enabled,"variation_axis":payload.variation_axis,"stage":payload.generation_stage}
     context_snapshot["source_admission"]=[{"url":url,"result":inspect_source(url)} for url in ([source_url] if source_url else [])]
     main_image_roles = ["主封面", "核心卖点", "套装内容", "成分质地", "使用场景"] if payload.action == "生成主图套系" else []
-    output_count = len(main_image_roles) or (max(4,payload.count) if storyboard_module and storyboard_module.production_method!="template" else payload.count)
+    output_count = len(main_image_roles) or payload.count
     is_template = bool(storyboard_module and storyboard_module.production_method == "template")
     route_key=(storyboard_module.module_type if storyboard_module else payload.action)+("_edit" if payload.parent_node_id else "");context_snapshot["model_route"]=route_key
     provider = None if is_template else get_image_provider(route_key)
@@ -569,44 +632,70 @@ def generate_variants(project_id: int, payload: CreativeGenerateRequest, db: Ses
         source_urls = [node.data.get("image_url") for node in selected if node.data.get("image_url")]
         if brand_profile and brand_profile.logo_url and storyboard_module and storyboard_module.module_type in {"hero", "brand"}:
             source_urls.append(brand_profile.logo_url)
-        urls = [render_storyboard_template(product, storyboard_module, project.id, brand_profile)] if is_template else provider.generate(source_url=source_url, source_urls=source_urls, variant_labels=main_image_roles or None, prompt=effective_prompt, action=payload.action, count=output_count, width=project.output_width, height=project.output_height, project_id=project.id)
+        provider_prompt = effective_prompt
+        provider_source_urls = source_urls
+        if protection_enabled and effective_product_lock == "strict" and not is_template:
+            provider_prompt += "。只生成不含商品、不含包装、不含Logo、不含任何文字的商业背景底图；在画面中央预留干净完整的商品摆放区域，商品主体稍后由系统使用原始像素合成。"
+            provider_source_urls = []
+        urls = [render_storyboard_template(product, storyboard_module, project.id, brand_profile)] if is_template else provider.generate(source_url=source_url, source_urls=provider_source_urls, variant_labels=main_image_roles or None, prompt=provider_prompt, action=payload.action, count=output_count, width=project.output_width, height=project.output_height, project_id=project.id)
         lock_results=[]
-        source_asset=db.query(ProductAsset).filter_by(product_id=product.id,tenant_id=auth.tenant_id,file_url=source_url).first() if source_url else None;protection=(source_asset.protection or {}) if source_asset else {}
-        if payload.product_lock in {"strict","balanced"} and source_url and not is_template:
+        source_asset=db.query(ProductAsset).filter_by(product_id=product.id,tenant_id=auth.tenant_id,file_url=source_url).first() if protection_enabled and source_url else None;protection=(source_asset.protection or {}) if source_asset else {}
+        if protection_enabled and effective_product_lock in {"strict","balanced"} and source_url and not is_template:
             locked=[]
             for url in urls:
                 try:
-                    locked_url=hard_lock_product(source_url,url,project.id,protection) if payload.product_lock=="strict" else restore_protected_regions(source_url,url,list(protection.get("protected_regions") or []),project.id)
+                    locked_url=hard_lock_product(source_url,url,project.id,protection) if effective_product_lock=="strict" else restore_protected_regions(source_url,url,list(protection.get("protected_regions") or []),project.id)
                     locked.append(locked_url);lock_results.append({"source":url,"status":"applied","mask_source":protection.get("mask_source"),"protected_region_count":len(protection.get("protected_regions") or [])})
                 except ValueError as exc:locked.append(url);lock_results.append({"source":url,"status":"unavailable","message":str(exc)})
             urls=locked
         candidate_similarity=duplicate_report(urls)
         context_snapshot["hard_lock_results"]=lock_results;context_snapshot["candidate_similarity"]=candidate_similarity
+        job.context_snapshot = context_snapshot
         db.refresh(job)
         if job.status == "cancelled":
-            job.duration_ms = int((time.perf_counter() - generation_started) * 1000); db.commit()
+            job.duration_ms = _generation_duration_ms(generation_started); db.commit()
             return {"generation": CreativeGenerationOut.model_validate(job), "nodes": []}
         max_x = max([node.position_x for node in db.query(CanvasNode).filter(CanvasNode.project_id == project_id).all()] or [0])
         base_y = parent.position_y if parent else 0
         result_ids = []
-        scored=[(url,score_output(url,storyboard_module.module_type if storyboard_module else "general",context_snapshot.get("brand_visual"))) for url in urls]
+        scored=[]
+        for index,url in enumerate(urls):
+            quality=score_output(url,storyboard_module.module_type if storyboard_module else "general",context_snapshot.get("brand_visual"))
+            lock_result=lock_results[index] if index < len(lock_results) else None
+            if protection_enabled and effective_product_lock == "strict":
+                lock_applied=bool(lock_result and lock_result.get("status") == "applied")
+                quality["product_lock_verified"]=lock_applied
+                if lock_applied:
+                    quality["product_consistency"]=100
+                    quality["total"]=round(100*.5+quality["brand_match"]*.25+quality["commercial_aesthetic"]*.25)
+                else:
+                    quality["product_consistency"]=0
+                    quality["total"]=min(quality["total"],49)
+                    quality["recommendation"]="regenerate"
+                    quality["issues"]=[*quality.get("issues",[]),"商品像素硬锁未成功，禁止自动入选"]
+            scored.append((url,quality))
         duplicate_indices={pair["right"] for pair in candidate_similarity.get("duplicates",[])}
-        ranked=sorted(range(len(scored)),key=lambda i:((i not in duplicate_indices),scored[i][1]["total"]),reverse=True);shortlist=set([i for i in ranked if i not in duplicate_indices][:2])
+        ranked=sorted(range(len(scored)),key=lambda i:((i not in duplicate_indices),scored[i][1]["total"]),reverse=True)
+        eligible_ranked=[i for i in ranked if i not in duplicate_indices and scored[i][1].get("recommendation") != "regenerate"]
+        shortlist=set(eligible_ranked[:2])
         for index, (url,quality) in enumerate(scored):
             node_id = uuid.uuid4().hex
             result_ids.append(node_id)
             db.add(CanvasNode(
                 id=node_id, tenant_id=auth.tenant_id, project_id=project_id, node_type="generated",
                 parent_node_id=payload.parent_node_id, position_x=max_x + 340, position_y=base_y + index * 360,
-                data={"label": storyboard_module.title if storyboard_module else (f"主图套系 · {main_image_roles[index]}" if main_image_roles else f"AI 方案 {chr(65 + index)}"), "image_url": url, "prompt": payload.prompt, "effective_prompt":effective_prompt,"action": payload.action, "storyboard_module_id": storyboard_module.id if storyboard_module else None, "module_role": storyboard_module.module_type if storyboard_module else (main_image_roles[index] if main_image_roles else None), "suite_type": "detail_page" if storyboard_module else ("main_image" if main_image_roles else None), "generation_id": job.id, "provider": "template_renderer" if is_template else provider.name,"quality_scores":quality,"auto_shortlisted":index in shortlist,"repair_instruction":repair_instruction(quality),"generation_stage":payload.generation_stage,"product_lock":payload.product_lock,"variation_axis":payload.variation_axis,"candidate_similarity":candidate_similarity, "context_summary": {"material_strategy": selection_strategy, "materials": [{"id": item.id, "type": item.node_type, "role": _material_role(item), "label": item.data.get("label"), "reason": material_reasons.get(item.id, "自动匹配")} for item in selected], "brand_documents": [{"id": doc.id, "title": doc.title} for doc in brand_docs], "skills": [{"id": skill.id, "name": skill.name, "scope": skill.scope} for skill in matched_skills], "learned_profile": bool(learned)}},
+                data={"label": storyboard_module.title if storyboard_module else (f"主图套系 · {main_image_roles[index]}" if main_image_roles else f"AI 方案 {chr(65 + index)}"), "image_url": url, "prompt": payload.prompt, "effective_prompt":effective_prompt,"action": payload.action, "storyboard_module_id": storyboard_module.id if storyboard_module else None, "module_role": storyboard_module.module_type if storyboard_module else (main_image_roles[index] if main_image_roles else None), "suite_type": "detail_page" if storyboard_module else ("main_image" if main_image_roles else None), "generation_id": job.id, "provider": "template_renderer" if is_template else provider.name,"quality_scores":quality,"hard_lock":lock_results[index] if index < len(lock_results) else None,"auto_shortlisted":index in shortlist and quality.get("recommendation") != "regenerate","repair_instruction":repair_instruction(quality),"generation_stage":payload.generation_stage,"product_lock":effective_product_lock,"variation_axis":payload.variation_axis,"candidate_similarity":candidate_similarity, "context_summary": {"material_strategy": selection_strategy, "materials": [{"id": item.id, "type": item.node_type, "role": _material_role(item), "label": item.data.get("label"), "reason": material_reasons.get(item.id, "自动匹配")} for item in selected], "brand_documents": [{"id": doc.id, "title": doc.title} for doc in brand_docs], "skills": [{"id": skill.id, "name": skill.name, "scope": skill.scope} for skill in matched_skills], "learned_profile": bool(learned)}},
             ))
         if storyboard_module and result_ids:
-            storyboard_module.preview_node_id = result_ids[ranked[0] if ranked else 0]
-            storyboard_module.status = "preview_ready"
-        job.result_node_ids = result_ids; job.status = "completed"; job.duration_ms = int((time.perf_counter() - generation_started) * 1000); db.commit(); db.refresh(job)
+            if eligible_ranked:
+                storyboard_module.preview_node_id = result_ids[eligible_ranked[0]]
+                storyboard_module.status = "preview_ready"
+            else:
+                storyboard_module.status = "failed_quality"
+        job.result_node_ids = result_ids; job.status = "completed"; job.duration_ms = _generation_duration_ms(generation_started); db.commit(); db.refresh(job)
     except Exception as exc:
         diagnostic = diagnose_generation_error(exc)
-        job.status = "failed"; job.error_message = diagnostic["title"]; job.duration_ms = int((time.perf_counter() - generation_started) * 1000)
+        job.status = "failed"; job.error_message = diagnostic["title"]; job.duration_ms = _generation_duration_ms(generation_started)
         job.context_snapshot = {**(job.context_snapshot or {}), "diagnostic": diagnostic}
         db.commit()
         raise HTTPException(status_code=500, detail=diagnostic)
@@ -690,7 +779,7 @@ async def vision_quality_summary(project_id:int,db:Session=Depends(get_db),auth:
     combined={"status":status,"score":score,"checked_count":len(all_items),"items":all_items,"issues":all_issues,"batches":len(reports),"suite_consistency":suite_report.get("suite_consistency") if suite_report else None,"model":reports[0].get("model") if reports else "","is_real_model":True}
     for node in nodes:
         saved=dict(node.data.get("vision_quality_suite") or {});node.data={**node.data,"vision_quality_suite":{**saved,"status":status,"score":score,"suite_consistency":combined["suite_consistency"],"is_real_model":True}}
-    protection_asset=next((asset for asset in assets if (asset.protection or {}).get("protected_regions")),None)
+    protection_asset=next((asset for asset in assets if (asset.protection or {}).get("protected_regions")),None) if get_settings().product_protection_enabled else None
     if protection_asset:
         for node in nodes:
             ocr=await compare_protected_text(protection_asset.file_url,str(node.data.get("image_url") or ""),list(protection_asset.protection.get("protected_regions") or []));node.data={**node.data,"protected_text_check":ocr}
@@ -701,7 +790,7 @@ def retry_by_quality(project_id:int,node_id:str,db:Session=Depends(get_db),auth:
     node=db.query(CanvasNode).filter_by(id=node_id,project_id=project_id,tenant_id=auth.tenant_id).first()
     if not node:raise HTTPException(404,"图片版本不存在")
     module_id=node.data.get("storyboard_module_id");instruction=node.data.get("repair_instruction") or "保持商品准确，优化构图和品牌一致性"
-    return generate_variants(project_id,CreativeGenerateRequest(prompt=instruction,action="按质检建议重试",selected_node_ids=[node.id],parent_node_id=node.id,auto_select_materials=True,module_id=module_id,count=4),db,auth)
+    return generate_variants(project_id,CreativeGenerateRequest(prompt=instruction,action="按质检建议重试",selected_node_ids=[node.id],parent_node_id=node.id,auto_select_materials=True,module_id=module_id,count=4,trigger_source="quality_retry"),db,auth)
 
 @router.get("/{project_id}/approval-issues")
 def approval_issues(project_id:int,db:Session=Depends(get_db),auth:AuthContext=Depends(current_auth)):

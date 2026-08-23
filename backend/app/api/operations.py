@@ -1,11 +1,12 @@
 """Non-canvas production operations: readiness, tasks, billing and approvals."""
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.auth import AuthContext, current_auth
@@ -114,8 +115,19 @@ def retry_tasks(payload: Ids, db: Session = Depends(get_db), auth: AuthContext =
     return {"results": results}
 
 @router.get("/tasks/statistics")
-def task_statistics(db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
-    rows = db.query(CreativeGeneration).filter(CreativeGeneration.tenant_id == auth.tenant_id).all()
+def task_statistics(project_id: Optional[int] = None, provider: str = "", status: str = "", date_from: str = "", date_to: str = "", error_code: str = "", db: Session = Depends(get_db), auth: AuthContext = Depends(current_auth)):
+    query = db.query(CreativeGeneration).filter(CreativeGeneration.tenant_id == auth.tenant_id)
+    if project_id is not None: query = query.filter(CreativeGeneration.project_id == project_id)
+    if provider: query = query.filter(CreativeGeneration.provider == provider)
+    if status == "attention":
+        stale_before = datetime.utcnow() - timedelta(minutes=30)
+        query = query.filter(or_(CreativeGeneration.status == "failed", and_(CreativeGeneration.status == "running", CreativeGeneration.updated_at < stale_before)))
+    elif status: query = query.filter(CreativeGeneration.status == status)
+    if date_from: query = query.filter(CreativeGeneration.created_at >= date_from)
+    if date_to: query = query.filter(CreativeGeneration.created_at <= f"{date_to} 23:59:59")
+    rows = query.all()
+    if error_code:
+        rows = [row for row in rows if row.status == "failed" and ((((row.context_snapshot or {}).get("diagnostic") or {}).get("code")) or "unknown") == error_code]
     errors = {}; durations = [r.duration_ms for r in rows if r.duration_ms is not None]
     for row in rows:
         if row.status == "failed":
@@ -160,7 +172,7 @@ def review_action(project_id: int, payload: ReviewAction, db: Session = Depends(
         modules=db.query(StoryboardModule).filter_by(project_id=project.id,tenant_id=auth.tenant_id).all();missing=[m.title for m in modules if m.required and m.status!="approved"]
         open_issues=db.query(ApprovalIssue).filter_by(project_id=project.id,tenant_id=auth.tenant_id,status="open").count()
         low=[];vision_missing=[];vision_blocked=[];protected_text_blocked=[]
-        product=db.query(Product).filter_by(id=project.product_id,tenant_id=auth.tenant_id).first();rule_set=db.query(QualityRuleSet).filter_by(tenant_id=auth.tenant_id,category=product.category).first();thresholds=(rule_set.thresholds if rule_set else {"hero":85,"product_showcase":82,"texture":75,"ingredient":75,"scenario":72,"information":80});has_protected_text=any((asset.protection or {}).get("protected_regions") for asset in db.query(ProductAsset).filter_by(product_id=product.id,tenant_id=auth.tenant_id).all())
+        product=db.query(Product).filter_by(id=project.product_id,tenant_id=auth.tenant_id).first();rule_set=db.query(QualityRuleSet).filter_by(tenant_id=auth.tenant_id,category=product.category).first();thresholds=(rule_set.thresholds if rule_set else {"hero":85,"product_showcase":82,"texture":75,"ingredient":75,"scenario":72,"information":80});has_protected_text=get_settings().product_protection_enabled and any((asset.protection or {}).get("protected_regions") for asset in db.query(ProductAsset).filter_by(product_id=product.id,tenant_id=auth.tenant_id).all())
         for module in modules:
             node=db.query(CanvasNode).filter_by(id=module.final_node_id or module.preview_node_id).first() if (module.final_node_id or module.preview_node_id) else None
             if node and (node.data.get("quality_scores") or {}).get("total",100)<65:low.append(module.title)

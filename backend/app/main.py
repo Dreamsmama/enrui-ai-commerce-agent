@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, brands, creative, dashboard, generations, knowledge, products, quality, skills, templates, operations, production, storage
+from app.api import auth, brands, creative, dashboard, knowledge, products, quality, skills, templates, operations, production, storage
 from app.config import get_settings
 from app.database import SessionLocal, engine, init_db
-from app.models import AuditLog, CreativeBatchJob, Generation
+from app.models import AuditLog, CreativeBatchJob, CreativeGeneration
 from app.services.production_queue import start_worker, stop_worker
 from app.services.redis_client import get_redis
 
@@ -49,7 +49,6 @@ async def audit_requests(request, call_next):
 
 app.include_router(products.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
-app.include_router(generations.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
@@ -61,25 +60,32 @@ app.include_router(production.router, prefix="/api")
 app.include_router(quality.router, prefix="/api")
 app.include_router(storage.router, prefix="/api")
 
-if settings.storage_provider == "local":
-    upload_path = settings.upload_path
-    app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
-
-
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
-    if settings.storage_provider == "local": settings.upload_path
     db = SessionLocal()
     try:
-        interrupted = db.query(Generation).filter(Generation.status == "running").all()
-        for generation in interrupted:
-            generation.status = "failed"
-            generation.error_message = "服务重启导致任务中断，可点击重试"
         interrupted_batches = db.query(CreativeBatchJob).filter(CreativeBatchJob.status.in_(["pending", "running"])).all()
         for batch in interrupted_batches:
             batch.status = "interrupted"
             batch.current_module_id = None
+        stale_before = datetime.utcnow() - timedelta(minutes=30)
+        interrupted_creative = db.query(CreativeGeneration).filter(
+            CreativeGeneration.status == "running",
+            CreativeGeneration.updated_at < stale_before,
+        ).all()
+        for generation in interrupted_creative:
+            generation.status = "failed"
+            generation.error_message = "任务超过 30 分钟未更新，已标记为中断，可点击重试"
+            generation.context_snapshot = {
+                **(generation.context_snapshot or {}),
+                "diagnostic": {
+                    "code": "interrupted",
+                    "title": "生成任务已中断",
+                    "suggestion": "进入项目重新生成该页面",
+                    "retryable": True,
+                },
+            }
         db.commit()
     finally:
         db.close()

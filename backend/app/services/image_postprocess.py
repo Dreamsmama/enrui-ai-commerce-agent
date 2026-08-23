@@ -67,10 +67,15 @@ def perceptual_hash(url:str,size:int=16)->int|None:
     image=Image.open(path).convert("L").resize((size,size),Image.Resampling.LANCZOS);pixels=np.asarray(image);return int(''.join('1' if value>=pixels.mean() else '0' for value in pixels.flat),2)
 
 
+def hamming_distance(value:int)->int:
+    """Count set bits on every supported Python version (including 3.9)."""
+    return bin(value).count("1")
+
+
 def similarity(left_url:str,right_url:str)->float|None:
     left,right=perceptual_hash(left_url),perceptual_hash(right_url)
     if left is None or right is None:return None
-    return round(1-(left^right).bit_count()/256,4)
+    return round(1-hamming_distance(left^right)/256,4)
 
 
 def duplicate_report(urls:list[str],threshold:float=.92)->dict:

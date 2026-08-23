@@ -31,9 +31,6 @@ class Product(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    generations: Mapped[list["Generation"]] = relationship(
-        "Generation", back_populates="product", cascade="all, delete-orphan"
-    )
     knowledge_docs: Mapped[list["KnowledgeDocument"]] = relationship(
         "KnowledgeDocument", back_populates="product", cascade="all, delete-orphan"
     )
@@ -58,49 +55,6 @@ class BrandVisualProfile(Base):
     tone_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class Generation(Base):
-    __tablename__ = "generations"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending/running/completed/failed
-    agent_results: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    detail_page_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    detail_page_sections: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    marketing_copy: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    main_image_copy: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-
-    product: Mapped["Product"] = relationship("Product", back_populates="generations")
-    edits: Mapped[list["EditHistory"]] = relationship(
-        "EditHistory", back_populates="generation", cascade="all, delete-orphan"
-    )
-
-
-class EditHistory(Base):
-    __tablename__ = "edit_histories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    generation_id: Mapped[int] = mapped_column(
-        ForeignKey("generations.id"), nullable=False, index=True
-    )
-    action: Mapped[str] = mapped_column(String(64), nullable=False)
-    section: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    before_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    after_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    generation: Mapped["Generation"] = relationship("Generation", back_populates="edits")
 
 
 class KnowledgeDocument(Base):
@@ -148,27 +102,6 @@ class DesignSkill(Base):
     accent_color: Mapped[str] = mapped_column(String(16), nullable=False, default="#dceee5")
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class ImageReview(Base):
-    __tablename__ = "image_reviews"
-    __table_args__ = (UniqueConstraint("generation_id", "module_key", name="uq_generation_module_review"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
-    generation_id: Mapped[int] = mapped_column(ForeignKey("generations.id"), nullable=False, index=True)
-    module_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    module_title: Mapped[str] = mapped_column(String(256), nullable=False, default="")
-    image_url: Mapped[str] = mapped_column(String(1024), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    reasons: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
-    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    visual_analysis: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    learning_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

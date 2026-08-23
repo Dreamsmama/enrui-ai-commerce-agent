@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     image_generation_watermark: bool = False
     image_generation_unit_cost_cny: float = 0.2
     generation_parameter_version: str = "commerce-image-v2"
+    product_protection_enabled: bool = False
     approval_webhook_url: str = ""
     volc_billing_api_url: str = ""
     volc_billing_api_token: str = ""
@@ -51,9 +52,8 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
-    upload_dir: str = "./uploads"
-    database_url: str = "sqlite:///./commerce_agent.db"
-    require_postgres: bool = False
+    database_url: str = "postgresql+psycopg://localhost/enrui_ai_commerce_agent"
+    require_postgres: bool = True
     require_online_services: bool = False
     database_pool_size: int = 10
     database_max_overflow: int = 20
@@ -62,25 +62,13 @@ class Settings(BaseSettings):
     redis_url: str = ""
     redis_key_prefix: str = "enrui-ai-commerce-agent:"
 
-    storage_provider: str = "local"
+    storage_provider: str = "aliyun_oss"
     aliyun_oss_region: str = ""
     aliyun_oss_endpoint: str = ""
     aliyun_oss_access_key_id: str = ""
     aliyun_oss_access_key_secret: str = ""
     aliyun_oss_bucket_name: str = ""
     aliyun_oss_prefix: str = "enrui-ai-commerce-agent/"
-
-    @property
-    def upload_path(self) -> Path:
-        path = Path(self.upload_dir)
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[1] / path
-        path.mkdir(parents=True, exist_ok=True)
-        (path / "images").mkdir(exist_ok=True)
-        (path / "documents").mkdir(exist_ok=True)
-        (path / "generated").mkdir(exist_ok=True)
-        return path
-
 
 @lru_cache
 def get_settings() -> Settings:

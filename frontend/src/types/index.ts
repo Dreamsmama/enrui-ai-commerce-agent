@@ -13,7 +13,6 @@ export interface Product {
   detail_image_urls: string[];
   created_at: string;
   updated_at: string;
-  generation_count: number;
   learned_profile_enabled: boolean;
 }
 
@@ -64,7 +63,7 @@ export interface StoryboardBatchJob {
   project_id: number;
   status: string;
   module_ids: number[];
-  module_results: Array<{ module_id: number; status: string; error?: string }>;
+  module_results: Array<{ module_id: number; status: string; error?: string | { code?: string; title: string; message?: string; suggestion?: string; retryable?: boolean } }>;
   total: number;
   completed: number;
   failed: number;
@@ -81,49 +80,6 @@ export interface ComplianceReport {
   knowledge_sources: Array<{ id: number; title: string; doc_type: string }>;
   visual_quality?: { status: 'passed' | 'review' | 'blocked'; score: number; checked_count: number; high_count: number; medium_count: number; issues: Array<{ module_id: number; module_title: string; severity: 'high' | 'medium'; type: string; message: string }> };
   product_consistency?: { status: 'passed' | 'review' | 'blocked' | 'unavailable'; score?: number; checked_count: number; summary?: string; message?: string; issues: Array<{ output_index: number; severity: 'high' | 'medium'; field: string; message: string; confidence: number }> };
-}
-
-export interface Generation {
-  id: number;
-  product_id: number;
-  status: 'pending' | 'running' | 'completed' | 'failed' | string;
-  agent_results: Record<string, unknown> | null;
-  detail_page_markdown: string | null;
-  detail_page_sections: Record<string, string | string[]> | null;
-  marketing_copy: string | null;
-  main_image_copy: string | null;
-  error_message: string | null;
-  attempt_count: number;
-  max_attempts: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GenerationListItem {
-  id: number;
-  product_id: number;
-  product_name: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EditRequest {
-  action: 'regenerate_section' | 'optimize_tone' | 'change_audience';
-  section?: string;
-  instruction?: string;
-  target_audience?: string;
-}
-
-export interface EditHistory {
-  id: number;
-  generation_id: number;
-  action: string;
-  section: string | null;
-  instruction: string | null;
-  before_content: string | null;
-  after_content: string | null;
-  created_at: string;
 }
 
 export interface KnowledgeDoc {
@@ -172,23 +128,6 @@ export interface DesignSkill {
 }
 
 export type DesignSkillCreate = Omit<DesignSkill, 'id' | 'version' | 'created_at' | 'updated_at'>;
-
-export interface ImageReview {
-  id: number;
-  generation_id: number;
-  product_id: number;
-  module_key: string;
-  module_title: string;
-  image_url: string;
-  status: 'usable' | 'needs_edit' | 'rejected' | 'final';
-  reasons: string[];
-  note: string;
-  weight: number;
-  visual_analysis: Record<string, unknown> | null;
-  learning_status: 'pending' | 'analyzing' | 'completed' | 'failed';
-  created_at: string;
-  updated_at: string;
-}
 
 export interface LearnedDesignProfile {
   id: number;
@@ -278,11 +217,68 @@ export interface ProductAsset {
   created_at: string;
 }
 
+export interface DashboardProjectItem {
+  id: number;
+  name: string;
+  product_name: string;
+  platform: string;
+  status: string;
+  review_status: string;
+  completed_pages: number;
+  total_pages: number;
+  updated_at: string;
+  path: string;
+}
+
 export interface DashboardStats {
-  product_count: number;
-  generation_count: number;
-  knowledge_doc_count: number;
-  recent_tasks: GenerationListItem[];
+  summary: {
+    project_count: number;
+    in_progress_projects: number;
+    completed_pages: number;
+    failed_tasks: number;
+    generated_images: number;
+  };
+  recent_projects: DashboardProjectItem[];
+  recent_project_tasks: Array<{
+    project_id: number;
+    project_name: string;
+    status: string;
+    running: number;
+    pending: number;
+    completed: number;
+    failed: number;
+    generated_images: number;
+    created_at: string;
+    updated_at: string;
+    triggered_by: string;
+    trigger_source: string;
+    path: string;
+  }>;
+  todos: Array<{
+    project_id: number;
+    project_name: string;
+    title: string;
+    action_label: string;
+    kind: string;
+    path: string;
+    updated_at: string;
+  }>;
+  last_project: DashboardProjectItem | null;
+}
+
+export interface CreativeGenerationRecord {
+  id: number;
+  module_id: number | null;
+  module_title: string;
+  action: string;
+  status: string;
+  provider: string;
+  result_count: number;
+  triggered_by: string;
+  trigger_source: string;
+  error_message: string;
+  suggestion: string;
+  created_at: string;
 }
 
 export const SECTION_LABELS: Record<string, string> = {

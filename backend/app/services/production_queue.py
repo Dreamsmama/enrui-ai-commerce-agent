@@ -31,7 +31,7 @@ def _run_task(task_id: str) -> None:
                 db.refresh(task)
                 if task.cancel_requested:
                     task.status="cancelled"; task.finished_at=datetime.utcnow(); db.commit(); return
-                payload=CreativeGenerateRequest(prompt=f"{module.objective}。{module.content_guidance}。{module.visual_direction}",action=f"详情页·{module.title}",selected_node_ids=[],auto_select_materials=True,module_id=module.id,count=1)
+                payload=CreativeGenerateRequest(prompt=f"{module.objective}。{module.content_guidance}。{module.visual_direction}",action=f"详情页·{module.title}",selected_node_ids=[],auto_select_materials=True,module_id=module.id,count=1,trigger_source="production_queue")
                 generate_variants(project_id,payload,db,auth); generated.append(module.id); task.progress=index+1; db.commit()
             task.result={"project_id":project_id,"generated_module_ids":generated}; task.status="completed"
         else:
