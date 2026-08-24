@@ -5,6 +5,7 @@
 - [技术架构说明](docs/01-TECHNICAL-ARCHITECTURE.md)：技术栈、系统分层、数据域、部署与安全边界。
 - [功能说明](docs/02-FEATURES.md)：当前功能范围和推荐业务流程。
 - [功能实现与开发指南](docs/03-IMPLEMENTATION-GUIDE.md)：关键入口、实现链路、扩展约定与技术债。
+- [业务流程图索引](docs/04-FLOWCHARTS.md)：商品详情页图片生成的完整流程图、分页说明与维护约定。
 
 ## 阿里云一键部署
 
