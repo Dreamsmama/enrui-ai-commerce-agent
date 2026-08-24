@@ -79,9 +79,9 @@ if [[ ! -d "$REPO_DIR/.git" ]]; then
   git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
 else
   log "拉取最新代码：$BRANCH"
-  git -C "$REPO_DIR" fetch --prune origin "$BRANCH"
-  git -C "$REPO_DIR" checkout --quiet "$BRANCH"
-  git -C "$REPO_DIR" reset --hard --quiet "origin/$BRANCH"
+  git -C "$REPO_DIR" fetch --prune origin \
+    "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  git -C "$REPO_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 fi
 
 COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)"
