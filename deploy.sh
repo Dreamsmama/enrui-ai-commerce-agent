@@ -9,6 +9,8 @@ ENV_FILE="$SHARED_DIR/.env"
 LOCK_DIR="$SHARED_DIR/.deploy.lock"
 REPO_URL="https://github.com/Dreamsmama/enrui-ai-commerce-agent.git"
 BRANCH="${DEPLOY_BRANCH:-main}"
+GIT_NETWORK_RETRIES="${DEPLOY_GIT_NETWORK_RETRIES:-5}"
+GIT_NETWORK_TIMEOUT_SECONDS="${DEPLOY_GIT_NETWORK_TIMEOUT_SECONDS:-45}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请使用 root 执行：sudo bash deploy.sh"
@@ -26,6 +28,41 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   fail "已有部署正在执行（锁目录：$LOCK_DIR）"
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+if [[ ! "$GIT_NETWORK_RETRIES" =~ ^[1-9][0-9]*$ ]]; then
+  fail "DEPLOY_GIT_NETWORK_RETRIES 必须是正整数"
+fi
+if [[ ! "$GIT_NETWORK_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  fail "DEPLOY_GIT_NETWORK_TIMEOUT_SECONDS 必须是正整数"
+fi
+
+git_with_retry() {
+  local attempt exit_code delay
+  for ((attempt = 1; attempt <= GIT_NETWORK_RETRIES; attempt++)); do
+    log "Git 网络操作尝试 $attempt/$GIT_NETWORK_RETRIES（单次最长 ${GIT_NETWORK_TIMEOUT_SECONDS} 秒）"
+    if GIT_TERMINAL_PROMPT=0 timeout --signal=TERM --kill-after=5s \
+      "${GIT_NETWORK_TIMEOUT_SECONDS}s" \
+      git -c http.version=HTTP/1.1 \
+          -c http.lowSpeedLimit=1024 \
+          -c http.lowSpeedTime=20 \
+          "$@"; then
+      return 0
+    fi
+
+    exit_code=$?
+    if [[ "$exit_code" -eq 124 ]]; then
+      log "Git 网络操作超时，已终止本次尝试"
+    else
+      log "Git 网络操作失败（退出码：$exit_code）"
+    fi
+    if [[ "$attempt" -lt "$GIT_NETWORK_RETRIES" ]]; then
+      delay=$((attempt * 5))
+      log "${delay} 秒后重试；当前线上容器不受影响"
+      sleep "$delay"
+    fi
+  done
+  fail "GitHub 连续 $GIT_NETWORK_RETRIES 次连接失败，停止部署；当前运行版本保持不变。请稍后重试"
+}
 
 install_runtime() {
   if ! command -v git >/dev/null || ! command -v curl >/dev/null; then
@@ -76,10 +113,10 @@ fi
 
 if [[ ! -d "$REPO_DIR/.git" ]]; then
   log "首次拉取仓库：$REPO_URL ($BRANCH)"
-  git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
+  git_with_retry clone --branch "$BRANCH" --single-branch "$REPO_URL" "$REPO_DIR"
 else
   log "拉取最新代码：$BRANCH"
-  git -C "$REPO_DIR" fetch --prune origin \
+  git_with_retry -C "$REPO_DIR" fetch --prune origin \
     "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
   git -C "$REPO_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 fi
