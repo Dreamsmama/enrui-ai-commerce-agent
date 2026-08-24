@@ -47,9 +47,10 @@ git_with_retry() {
           -c http.lowSpeedTime=20 \
           "$@"; then
       return 0
+    else
+      exit_code=$?
     fi
 
-    exit_code=$?
     if [[ "$exit_code" -eq 124 ]]; then
       log "Git 网络操作超时，已终止本次尝试"
     else
